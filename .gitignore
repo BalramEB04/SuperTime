@@ -8,14 +8,14 @@ timesheet-Frontend/node_modules/
 timesheet-Frontend/dist/
 
 # Backend virtual environments & caches
-timesheet-management-Backend/.venv/
-timesheet-management-Backend/venv/
-timesheet-management-Backend/__pycache__/
-timesheet-management-Backend/*/__pycache__/
-timesheet-management-Backend/*/*/__pycache__/
-timesheet-management-Backend/.pytest_cache/
-timesheet-management-Backend/.ruff_cache/
-timesheet-management-Backend/uploads/
+timesheet-Backend/.venv/
+timesheet-Backend/venv/
+timesheet-Backend/__pycache__/
+timesheet-Backend/*/__pycache__/
+timesheet-Backend/*/*/__pycache__/
+timesheet-Backend/.pytest_cache/
+timesheet-Backend/.ruff_cache/
+timesheet-Backend/uploads/
 *.pyc
 
 # Local SQLite databases & logs
