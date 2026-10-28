@@ -1,0 +1,46 @@
+services:
+  backend:
+    build:
+      context: ./timesheet-management-Backend
+      dockerfile: Dockerfile
+    container_name: timesheet-backend
+    restart: unless-stopped
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=${DATABASE_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - REFRESH_TOKEN_EXPIRE_DAYS=7
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - FRONTEND_URLS=${FRONTEND_URLS:-["http://localhost"]}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+    ports:
+      - "8000:8000"
+    networks:
+      - timesheet-network
+
+  frontend:
+    build:
+      context: ./timesheet-Frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=/api/v1
+        - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+    container_name: timesheet-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - timesheet-network
+
+networks:
+  timesheet-network:
+    driver: bridge

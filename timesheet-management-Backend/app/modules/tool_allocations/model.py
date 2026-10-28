@@ -1,0 +1,26 @@
+from datetime import date, datetime
+from typing import Optional
+
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.database import Base
+
+
+class ToolAllocation(Base):
+    __tablename__ = "tool_allocations"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    milestone_id: Mapped[int] = mapped_column(ForeignKey("milestones.id", ondelete="CASCADE"), nullable=False, index=True)
+    tool_id: Mapped[int] = mapped_column(ForeignKey("tools.id"), nullable=False)
+    monthly_cost: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    seats: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    allocation_date: Mapped[date] = mapped_column(Date, nullable=False)
+    deallocation_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    allocation_basis: Mapped[str] = mapped_column(String(20), default="working_day", nullable=False)  # working_day | calendar_day | week | month
+    status: Mapped[str] = mapped_column(String(20), default="Active", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    milestone: Mapped["Milestone"] = relationship("Milestone", back_populates="tool_allocations")
+    tool: Mapped["Tool"] = relationship("Tool", back_populates="allocations")
+

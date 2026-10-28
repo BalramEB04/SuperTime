@@ -1,0 +1,86 @@
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python / Byte-compiled
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# AI Assistants & Agent Caches
+.claude/
+.agents/
+.gemini/
+
+
+
+# Temporary / Scratch Test Scripts
+test_db.py
+test_holidays.py
+test_leave_balances.py
+test_leave_types.py
+
+# Testing & Code Quality Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py:trad.orig
+
+# Database Files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Build & Distribution Artifacts
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# OS & System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+scratch/

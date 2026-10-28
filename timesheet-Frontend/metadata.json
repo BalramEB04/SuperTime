@@ -1,0 +1,10 @@
+{
+  "name": "Timesheet Management System",
+  "description": "Timesheet Management System",
+  "requestFramePermissions": [
+    "https://ai.google.dev/"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
