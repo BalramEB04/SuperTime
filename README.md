@@ -1,4 +1,4 @@
-# SuperTime — Timesheet Management System (Monorepo)
+# SuperTime — Timesheet Management System 
 
 A unified full-stack monorepo for employee timesheet tracking, project allocations, leave management, and reporting.
 
