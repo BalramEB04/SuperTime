@@ -71,9 +71,9 @@ ADMIN_EMAIL=admin@yourcompany.com
 docker compose up -d --build
 ```
 
-* **Frontend:** Open [http://localhost](http://localhost) (or your server IP)
-* **Backend API Docs:** Open [http://localhost/docs](http://localhost/docs)
-* **Health Check:** Open [http://localhost/api/v1/health](http://localhost/api/v1/health)
+* **Frontend:** Open [http://localhost:3000](http://localhost:3000) (Google SSO compatible)
+* **Backend API Docs:** Open [http://localhost:3000/docs](http://localhost:3000/docs)
+* **Health Check:** Open [http://localhost:3000/api/v1/health](http://localhost:3000/api/v1/health)
 
 To view live logs:
 ```bash
