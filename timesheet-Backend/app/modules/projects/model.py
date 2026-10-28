@@ -19,7 +19,7 @@ class Project(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     client_id: Mapped[Optional[int]] = mapped_column(ForeignKey("clients.id"), nullable=True)
     project_manager_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    project_name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
+    project_name: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     budget: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)

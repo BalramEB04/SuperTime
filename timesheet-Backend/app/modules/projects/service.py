@@ -208,7 +208,14 @@ class ProjectService:
         if not is_ac_manager:
             project_in.budget = None
 
-        project = await self.repository.create(project_in)
+        try:
+            project = await self.repository.create(project_in)
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create project. A database constraint was violated."
+            )
         
         from app.modules.project_assignments.schema import ProjectAssignmentCreate
         from app.modules.project_assignments.repository import ProjectAssignmentRepository
@@ -250,7 +257,14 @@ class ProjectService:
         if not is_ac_manager:
             project_in.budget = None
 
-        updated_project = await self.repository.update(project, project_in)
+        try:
+            updated_project = await self.repository.update(project, project_in)
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to update project. A database constraint was violated."
+            )
         financials = await self.compute_financials_for_projects(self.db, [updated_project], current_user=current_user)
         return financials[0]
 
