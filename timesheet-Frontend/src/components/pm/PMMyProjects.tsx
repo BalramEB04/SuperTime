@@ -258,12 +258,12 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
   // PM's projects
-  const pmProjects = (projects || []).filter(
-    (p) =>
-      (p.pmName && currentUser?.name && p.pmName.toLowerCase() === currentUser.name.toLowerCase()) ||
-      currentUser?.role === 'admin' ||
-      currentUser?.role === 'pm'
-  );
+  const pmProjects = (projects || []).filter((p) => {
+    if (currentUser?.role === 'admin') return true;
+    if (p.project_manager_id && currentUser?.id && String(p.project_manager_id) === String(currentUser.id)) return true;
+    if (p.pmName && currentUser?.name && p.pmName.trim().toLowerCase() === currentUser.name.trim().toLowerCase()) return true;
+    return false;
+  });
 
   // Filtered projects
   useEffect(() => { setCurrentPage(1); }, [searchTerm, statusFilter]);

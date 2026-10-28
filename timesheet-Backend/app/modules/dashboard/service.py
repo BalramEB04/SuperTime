@@ -135,43 +135,61 @@ class DashboardService:
         role_overview = None
         role_name = current_user.role.name if current_user.role else ""
         if role_name in ["Admin", "Project_Manager", "Account_Manager"]:
+            is_pm = role_name == "Project_Manager"
             role_overview = {
                 "role": role_name,
                 "team_pending_leaves": 0,
                 "active_org_projects": 0
             }
             
-            pending_res = await db.execute(
-                select(func.count(LeaveRequest.id)).where(LeaveRequest.status == 'Pending')
-            )
-            role_overview["team_pending_leaves"] = pending_res.scalar() or 0
-            
-            active_proj_res = await db.execute(
-                select(func.count(Project.id)).where(Project.status == 'Active')
-            )
-            role_overview["active_org_projects"] = active_proj_res.scalar() or 0
-            
-            # Admin Overview
-            active_users_res = await db.execute(
-                select(func.count(User.id)).where(User.status == 'Active')
-            )
-            active_users_count = active_users_res.scalar() or 0
-            
-            # Count users on leave today
-            on_leave_users_res = await db.execute(
-                select(func.count(User.id)).join(LeaveRequest, User.id == LeaveRequest.user_id)
-                .where(LeaveRequest.status == 'Approved')
-                .where(LeaveRequest.start_date <= today)
-                .where(LeaveRequest.end_date >= today)
-            )
-            on_leave_users_count = on_leave_users_res.scalar() or 0
-            
-            admin_overview = AdminOverviewWidget(
-                active_users_count=active_users_count,
-                on_leave_users_count=on_leave_users_count,
-                pending_leaves_count=role_overview["team_pending_leaves"],
-                active_projects_count=role_overview["active_org_projects"]
-            )
+            if is_pm:
+                active_proj_res = await db.execute(
+                    select(func.count(Project.id)).where(Project.is_active == True, Project.project_manager_id == current_user.id)
+                )
+                role_overview["active_org_projects"] = active_proj_res.scalar() or 0
+
+                from app.modules.project_assignments.model import ProjectAssignment
+                pending_res = await db.execute(
+                    select(func.count(LeaveRequest.id))
+                    .join(ProjectAssignment, LeaveRequest.user_id == ProjectAssignment.user_id)
+                    .join(Project, ProjectAssignment.project_id == Project.id)
+                    .where(Project.project_manager_id == current_user.id, LeaveRequest.status == 'Pending')
+                )
+                role_overview["team_pending_leaves"] = pending_res.scalar() or 0
+            else:
+                pending_res = await db.execute(
+                    select(func.count(LeaveRequest.id)).where(LeaveRequest.status == 'Pending')
+                )
+                role_overview["team_pending_leaves"] = pending_res.scalar() or 0
+                
+                active_proj_res = await db.execute(
+                    select(func.count(Project.id)).where(Project.is_active == True)
+                )
+                role_overview["active_org_projects"] = active_proj_res.scalar() or 0
+
+            # Admin Overview: ONLY for Admin role
+            admin_overview = None
+            if role_name == "Admin":
+                active_users_res = await db.execute(
+                    select(func.count(User.id)).where(User.status == 'Active')
+                )
+                active_users_count = active_users_res.scalar() or 0
+                
+                # Count users on leave today
+                on_leave_users_res = await db.execute(
+                    select(func.count(User.id)).join(LeaveRequest, User.id == LeaveRequest.user_id)
+                    .where(LeaveRequest.status == 'Approved')
+                    .where(LeaveRequest.start_date <= today)
+                    .where(LeaveRequest.end_date >= today)
+                )
+                on_leave_users_count = on_leave_users_res.scalar() or 0
+                
+                admin_overview = AdminOverviewWidget(
+                    active_users_count=active_users_count,
+                    on_leave_users_count=on_leave_users_count,
+                    pending_leaves_count=role_overview["team_pending_leaves"],
+                    active_projects_count=role_overview["active_org_projects"]
+                )
 
         return DashboardSummaryResponse(
             timesheet_summary=timesheet_widget,
@@ -180,5 +198,5 @@ class DashboardService:
             recent_leaves=recent_leaves,
             upcoming_holiday=upcoming_holiday_widget,
             role_overview=role_overview,
-            admin_overview=admin_overview if role_name in ["Admin", "Project_Manager", "Account_Manager"] else None
+            admin_overview=admin_overview if role_name == "Admin" else None
         )

@@ -203,6 +203,7 @@ export const dataApi = apiSlice.injectEndpoints({
           name: p.project_name,
           code: `PRJ-${p.id}`,
           client: p.client_name || '',
+          project_manager_id: p.project_manager_id ? Number(p.project_manager_id) : undefined,
           pmName: p.project_manager_name || 'Unknown',
           pmAvatar: '',
           status: p.status || 'Milestone Planning',

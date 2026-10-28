@@ -195,7 +195,7 @@ async def get_daily_eod_preview(
 ):
     from app.services.eod_report_service import EodReportService
     target_date = date_val or date.today()
-    entries = await EodReportService.get_daily_eod_entries(db, target_date)
+    entries = await EodReportService.get_daily_eod_entries(db, target_date, current_user=current_user)
     total_b = sum(e["billable_hours"] for e in entries)
     total_nb = sum(e["non_billable_hours"] for e in entries)
     unique_employees = len(set(e["employee_id"] for e in entries))
@@ -229,7 +229,7 @@ async def export_daily_eod(
     from app.services.eod_report_service import EodReportService
 
     target_date = date_val or date.today()
-    entries = await EodReportService.get_daily_eod_entries(db, target_date)
+    entries = await EodReportService.get_daily_eod_entries(db, target_date, current_user=current_user)
 
     if format_type.lower() == "csv":
         csv_content = EodReportService.generate_daily_eod_csv(entries, target_date)

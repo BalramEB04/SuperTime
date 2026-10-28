@@ -19,23 +19,37 @@ pm_only = require_roles("Project_Manager", "Account_Manager", "Admin")
 
 
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED, dependencies=[Depends(pm_only)])
-async def assign_user(assignment_in: ProjectAssignmentCreate, db: AsyncSession = Depends(get_db)):
+async def assign_user(
+    assignment_in: ProjectAssignmentCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
     service = ProjectAssignmentService(db)
-    assignment = await service.assign_user_to_project(assignment_in)
+    assignment = await service.assign_user_to_project(assignment_in, current_user=current_user)
     return created_response(data=assignment.model_dump(mode="json"), message="User assigned to project successfully")
 
 
 @router.post("/batch", response_model=dict, status_code=status.HTTP_201_CREATED, dependencies=[Depends(pm_only)])
-async def batch_assign_users(batch_in: BatchProjectAssignmentCreate, db: AsyncSession = Depends(get_db)):
+async def batch_assign_users(
+    batch_in: BatchProjectAssignmentCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
     service = ProjectAssignmentService(db)
-    result = await service.batch_assign_users_to_projects(batch_in)
+    result = await service.batch_assign_users_to_projects(batch_in, current_user=current_user)
     return created_response(data=result.model_dump(mode="json"), message=result.message)
 
 
 @router.get("/project/{project_id}", response_model=dict, dependencies=[Depends(pm_only)])
-async def get_project_assignments(project_id: int, skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+async def get_project_assignments(
+    project_id: int,
+    skip: int = 0,
+    limit: int = 100,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
     service = ProjectAssignmentService(db)
-    assignments = await service.get_project_assignments(project_id, skip=skip, limit=limit)
+    assignments = await service.get_project_assignments(project_id, skip=skip, limit=limit, current_user=current_user)
     return success_response(data=[a.model_dump(mode="json") for a in assignments], message="Project assignments retrieved successfully")
 
 
@@ -73,15 +87,24 @@ async def get_user_assignments(
 
 
 @router.delete("/{assignment_id}", response_model=dict, dependencies=[Depends(pm_only)])
-async def remove_assignment(assignment_id: int, db: AsyncSession = Depends(get_db)):
+async def remove_assignment(
+    assignment_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
     service = ProjectAssignmentService(db)
-    await service.remove_assignment(assignment_id)
+    await service.remove_assignment(assignment_id, current_user=current_user)
     return success_response(message="Project assignment removed successfully")
 
 
 @router.delete("/project/{project_id}/user/{user_id}", response_model=dict, dependencies=[Depends(pm_only)])
-async def remove_assignment_by_project_user(project_id: int, user_id: int, db: AsyncSession = Depends(get_db)):
+async def remove_assignment_by_project_user(
+    project_id: int,
+    user_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
     service = ProjectAssignmentService(db)
-    await service.remove_assignment_by_project_user(project_id, user_id)
+    await service.remove_assignment_by_project_user(project_id, user_id, current_user=current_user)
     return success_response(message="Project assignment removed successfully")
 
