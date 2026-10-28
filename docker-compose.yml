@@ -21,6 +21,8 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
     ports:
       - "8000:8000"
+    volumes:
+      - backend-uploads:/app/uploads
     networks:
       - timesheet-network
 
@@ -44,3 +46,7 @@ services:
 networks:
   timesheet-network:
     driver: bridge
+
+volumes:
+  backend-uploads:
+
