@@ -9,7 +9,15 @@ from app.modules.projects.schema import ProjectCreate, ProjectUpdate, ProjectRes
 from app.modules.clients.repository import ClientRepository
 from app.modules.users.repository import UserRepository
 from app.modules.users.model import User
-from app.common.file_handler import save_upload_file, delete_file, ALLOWED_DOCUMENT_EXTENSIONS
+from app.common.file_handler import (
+    save_upload_file,
+    delete_file,
+    validate_file_extension,
+    validate_file_size,
+    generate_unique_filename,
+    ALLOWED_DOCUMENT_EXTENSIONS,
+)
+from app.services.storage_service import storage_service
 
 
 class ProjectService:
@@ -33,9 +41,13 @@ class ProjectService:
 
     @staticmethod
     def _is_pm(user: Optional[User]) -> bool:
-        if not user or not user.role:
+        if not user:
             return False
-        return user.role.name == "Project_Manager"
+        if 'role' in getattr(user, '__dict__', {}):
+            return bool(user.role and user.role.name == 'Project_Manager')
+        if hasattr(user, 'role_id') and user.role_id is not None:
+            return user.role_id == 2
+        return False
 
     async def get_project_by_id(self, project_id: int, current_user: Optional[User] = None) -> ProjectResponse:
         project = await self.repository.get_by_id(project_id)
@@ -84,8 +96,17 @@ class ProjectService:
         except Exception:
             milestone_map = {}
 
-        is_ac_manager = current_user and current_user.role and current_user.role.name == "Account_Manager"
-        is_admin = current_user and current_user.role and current_user.role.name.lower() == "admin"
+        role_name = ""
+        if current_user:
+            if "role" in getattr(current_user, "__dict__", {}) and current_user.role:
+                role_name = current_user.role.name.lower()
+            elif getattr(current_user, "role_id", None) == 1:
+                role_name = "admin"
+            elif getattr(current_user, "role_id", None) == 3:
+                role_name = "account_manager"
+
+        is_ac_manager = role_name == "account_manager"
+        is_admin = role_name == "admin"
         can_view_budget = is_ac_manager or is_admin
         
         today = date.today()
@@ -290,22 +311,43 @@ class ProjectService:
                 detail="Forbidden: You cannot upload documents to another Project Manager's project."
             )
 
-        dest_dir = Path("uploads") / "projects" / str(project_id)
-        saved_path = await save_upload_file(
-            file,
-            dest_dir,
-            allowed_extensions=ALLOWED_DOCUMENT_EXTENSIONS,
-            max_size_mb=10.0,
-        )
+        if not file.filename:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Filename cannot be empty")
 
-        file_size = saved_path.stat().st_size if saved_path.exists() else None
-        # Format web accessible path
-        web_path = f"/uploads/projects/{project_id}/{saved_path.name}"
+        if not validate_file_extension(file.filename, ALLOWED_DOCUMENT_EXTENSIONS):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid file type. Allowed types: {', '.join(sorted(ALLOWED_DOCUMENT_EXTENSIONS))}",
+            )
+
+        content = await file.read()
+        file_size = len(content)
+        if not validate_file_size(file_size, max_size_mb=10.0):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File size exceeds maximum limit of 10 MB",
+            )
+
+        unique_name = generate_unique_filename(file.filename)
+        storage_key = f"projects/{project_id}/{unique_name}"
+
+        # If Object Storage (Neon / AWS S3) is configured, upload to cloud storage
+        if storage_service.is_configured:
+            content_type = file.content_type or "application/octet-stream"
+            storage_service.upload_file(content=content, key=storage_key, content_type=content_type)
+            stored_path = storage_key
+        else:
+            dest_dir = Path("uploads") / "projects" / str(project_id)
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            local_file = dest_dir / unique_name
+            with open(local_file, "wb") as f:
+                f.write(content)
+            stored_path = f"/uploads/projects/{project_id}/{unique_name}"
 
         doc = ProjectDocument(
             project_id=project_id,
             file_name=file.filename,
-            file_path=web_path,
+            file_path=stored_path,
             file_size=file_size,
             file_type=file.content_type,
         )
@@ -326,8 +368,11 @@ class ProjectService:
         if not doc or doc.project_id != project_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-        # Delete local file if exists
-        rel_path = doc.file_path.lstrip("/")
-        delete_file(rel_path)
+        # Delete from S3/Neon if it is an object key
+        if storage_service.is_configured and not doc.file_path.startswith("/uploads") and not doc.file_path.startswith("http"):
+            storage_service.delete_file(doc.file_path)
+        else:
+            rel_path = doc.file_path.lstrip("/")
+            delete_file(rel_path)
 
         await self.repository.delete_document(doc)

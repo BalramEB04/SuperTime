@@ -49,6 +49,18 @@ class ProjectDocumentResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @model_validator(mode="after")
+    def resolve_file_url(self) -> "ProjectDocumentResponse":
+        path = self.file_path
+        if path and not path.startswith("http") and not path.startswith("/uploads"):
+            try:
+                from app.services.storage_service import storage_service
+                if storage_service.is_configured:
+                    self.file_path = storage_service.generate_presigned_url(path, expires_in=86400)
+            except Exception:
+                pass
+        return self
+
 
 class ProjectResponse(BaseModel):
     id: int

@@ -363,12 +363,12 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
         for (const file of selectedCreateFiles) {
           try {
             await uploadProjectDoc({ projectId: String(newProjId), file }).unwrap();
-          } catch (docErr) {
+          } catch (docErr: any) {
             console.error('Failed to upload document:', docErr);
+            onShowToast('Document Upload Warning', docErr?.data?.message || docErr?.data?.detail || 'Failed to upload document', 'warning');
           }
         }
       }
-
       onShowToast('Project Created', `Successfully created ${newProject.name}`, 'success');
       setShowCreateModal(false);
       setSelectedCreateFiles([]);
