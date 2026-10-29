@@ -1,21 +1,20 @@
-import os
-from fastapi import APIRouter, Depends, Response, Request, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.responses import success_response
+from app.core.config import settings
 from app.core.database import get_db
 from app.dependencies.auth import get_current_active_user
-from app.modules.users.model import User
-from app.modules.auth.schema import (
-    GoogleLoginRequest,
-    UserAuthResponse,
+from app.modules.auth.service import (
+    login_with_google,
+    refresh_access_token,
 )
-from app.modules.auth.service import login_with_google, refresh_access_token
-from app.core.config import settings
+from app.modules.users.model import User
 
 router = APIRouter()
 
-# In production (Vercel → Render cross-site), cookies MUST be Secure + SameSite=None.
+# In production (Vercel + Render cross-site), cookies MUST be Secure + SameSite=None.
 # Locally (same-origin via Vite proxy) SameSite=lax works without HTTPS.
 _IS_PRODUCTION = settings.ENVIRONMENT == "production"
 _COOKIE_SAMESITE = "none" if _IS_PRODUCTION else "lax"
@@ -59,6 +58,10 @@ def clear_auth_cookies(response: Response):
     )
 
 
+class GoogleLoginRequest(BaseModel):
+    credential: str = Field(..., description="Google ID Token JWT from Google Identity Services")
+
+
 @router.post("/google/login", summary="Login using Google SSO")
 async def google_login(request: GoogleLoginRequest, db: AsyncSession = Depends(get_db)):
     """
@@ -84,8 +87,17 @@ async def google_login(request: GoogleLoginRequest, db: AsyncSession = Depends(g
 async def refresh_token(request: Request, db: AsyncSession = Depends(get_db)):
     """
     Exchanges a valid refresh token for a new access token and refresh token.
+    Supports reading refresh_token from cookies or JSON body.
     """
     token = request.cookies.get("refresh_token")
+    if not token:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                token = body.get("refresh_token")
+        except Exception:
+            token = None
+
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -93,7 +105,12 @@ async def refresh_token(request: Request, db: AsyncSession = Depends(get_db)):
         )
     auth_data = await refresh_access_token(token, db)
     resp = success_response(
-        data={"user": auth_data.user.model_dump()},
+        data={
+            "access_token": auth_data.access_token,
+            "refresh_token": auth_data.refresh_token,
+            "token_type": "bearer",
+            "user": auth_data.user.model_dump(),
+        },
         message="Token refreshed successfully",
     )
     set_auth_cookies(resp, auth_data.access_token, auth_data.refresh_token)
@@ -116,18 +133,23 @@ async def logout():
 @router.get("/me", summary="Get authenticated user profile")
 async def get_me(current_user: User = Depends(get_current_active_user)):
     """
-    Returns profile information for the currently authenticated active user.
+    Returns the currently authenticated user's profile.
+    Can be used by the frontend on page load to verify the session.
     """
-    user_response = UserAuthResponse(
-        id=current_user.id,
-        email=current_user.email,
-        first_name=current_user.first_name,
-        last_name=current_user.last_name,
-        role=current_user.role.name,
-        employee_id=current_user.employee_id,
-    )
-    return success_response(
-        data=user_response.model_dump(),
-        message="User profile retrieved successfully",
-    )
-
+    role_name = current_user.role.name if current_user.role else "Employee"
+    user_data = {
+        "id": current_user.id,
+        "employee_id": current_user.employee_id,
+        "first_name": current_user.first_name,
+        "last_name": current_user.last_name,
+        "email": current_user.email,
+        "phone_number": current_user.phone_number,
+        "avatar": current_user.avatar,
+        "role": role_name,
+        "role_id": current_user.role_id,
+        "department_id": current_user.department_id,
+        "status": current_user.status,
+        "joining_date": current_user.joining_date.isoformat() if current_user.joining_date else None,
+        "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+    }
+    return success_response(data=user_data, message="User profile retrieved successfully")

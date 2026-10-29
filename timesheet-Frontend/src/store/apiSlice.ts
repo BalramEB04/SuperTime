@@ -15,12 +15,19 @@ if (!API_BASE_URL) {
 const baseQuery = fetchBaseQuery({
   baseUrl: API_BASE_URL,
   credentials: 'include',
-  timeout: 10000, // 10 second timeout to prevent infinite hanging
+  timeout: 30000, // 30 second timeout to accommodate Render cold starts & large uploads
+  prepareHeaders: (headers, { getState }) => {
+    const token = (getState() as RootState).auth?.token || (typeof window !== 'undefined' ? localStorage.getItem('access_token') : null);
+    if (token) {
+      headers.set('Authorization', 'Bearer ' + token);
+    }
+    return headers;
+  },
 });
 
 const mutex = new Mutex();
 let lastRefreshFailTime = 0;
-const REFRESH_TIMEOUT = 10000; // 10 seconds
+const REFRESH_TIMEOUT = 30000; // 30 seconds
 
 const baseQueryWithReauth = async (args: any, api: any, extraOptions: any) => {
   await mutex.waitForUnlock();
@@ -35,10 +42,12 @@ const baseQueryWithReauth = async (args: any, api: any, extraOptions: any) => {
     if (!mutex.isLocked()) {
       const release = await mutex.acquire();
       try {
+        const storedRefreshToken = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : undefined;
         const refreshResult = await baseQuery(
           {
             url: '/auth/refresh',
             method: 'POST',
+            body: storedRefreshToken ? { refresh_token: storedRefreshToken } : undefined,
           },
           api,
           extraOptions
@@ -48,23 +57,30 @@ const baseQueryWithReauth = async (args: any, api: any, extraOptions: any) => {
           const data = (refreshResult.data as any).data;
           if (data && data.user) {
             const normalizedUser = mapBackendUserToFrontendUser(data.user);
+            const newToken = data.access_token || data.accessToken;
+            if (newToken && typeof window !== 'undefined') {
+              localStorage.setItem('access_token', newToken);
+            }
+            if (data.refresh_token && typeof window !== 'undefined') {
+              localStorage.setItem('refresh_token', data.refresh_token);
+            }
             api.dispatch({
               type: 'auth/setCredentials',
               payload: {
                 user: normalizedUser,
+                token: newToken,
+                refreshToken: data.refresh_token,
               },
             });
             result = await baseQuery(args, api, extraOptions);
           } else {
             lastRefreshFailTime = Date.now();
             api.dispatch(logout());
-            // Clear stale cache so the next user never sees another user's data
             api.dispatch(apiSlice.util.resetApiState());
           }
         } else {
           lastRefreshFailTime = Date.now();
           api.dispatch(logout());
-          // Clear stale cache on refresh failure too
           api.dispatch(apiSlice.util.resetApiState());
         }
       } finally {
@@ -75,13 +91,30 @@ const baseQueryWithReauth = async (args: any, api: any, extraOptions: any) => {
       result = await baseQuery(args, api, extraOptions);
     }
   }
+
   return result;
 };
 
 export const apiSlice = createApi({
   reducerPath: 'api',
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['User',
-    'Department', 'Project', 'Timesheet', 'LeaveRequest', 'LeaveBalance', 'WeekendWork', 'Holiday', 'LeaveType', 'Role', 'Tool'],
-  endpoints: (builder) => ({}),
+  tagTypes: [
+    'User',
+    'Project',
+    'Timesheet',
+    'Holiday',
+    'LeaveRequest',
+    'LeaveBalance',
+    'LeaveType',
+    'Setting',
+    'Dashboard',
+    'Client',
+    'Tool',
+    'Department',
+    'WorkingCalendar',
+    'Notifications',
+    'WeekendWork',
+    'Role',
+  ],
+  endpoints: () => ({}),
 });

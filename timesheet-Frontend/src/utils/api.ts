@@ -92,6 +92,7 @@ export async function fetchCurrentUserApi(): Promise<User> {
   const response = await fetch(`${API_BASE_URL}/auth/me`, {
     method: 'GET',
     credentials: 'include',
+    headers: authHeader(),
   });
 
   const json = await response.json();
@@ -202,7 +203,12 @@ export interface UserUpdatePayload {
 }
 
 function authHeader() {
-  return { 'Content-Type': 'application/json' };
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = 'Bearer ' + token;
+  }
+  return headers;
 }
 
 async function handleResponse<T>(res: Response): Promise<T> {

@@ -3,6 +3,11 @@ import { User, UserRole } from '../../types';
 
 export interface AuthSuccessData {
   user: User;
+  access_token?: string;
+  refresh_token?: string;
+  token_type?: string;
+  accessToken?: string;
+  refreshToken?: string;
 }
 
 export function mapBackendRoleToFrontendRole(backendRole: string | any): UserRole {
@@ -68,6 +73,8 @@ export const authApi = apiSlice.injectEndpoints({
         const data = response.data;
         return {
           ...data,
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token,
           user: mapBackendUserToFrontendUser(data.user),
         };
       },
