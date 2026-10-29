@@ -136,20 +136,23 @@ async def get_me(current_user: User = Depends(get_current_active_user)):
     Returns the currently authenticated user's profile.
     Can be used by the frontend on page load to verify the session.
     """
-    role_name = current_user.role.name if current_user.role else "Employee"
+    role = getattr(current_user, "role", None)
+    role_name = role.name if role and hasattr(role, "name") else "Employee"
+    
+    joining_date = getattr(current_user, "joining_date", None)
+    created_at = getattr(current_user, "created_at", None)
+
     user_data = {
         "id": current_user.id,
-        "employee_id": current_user.employee_id,
+        "employee_id": getattr(current_user, "employee_id", None) or f"EMP-{current_user.id:03d}",
         "first_name": current_user.first_name,
         "last_name": current_user.last_name,
         "email": current_user.email,
-        "phone_number": current_user.phone_number,
-        "avatar": current_user.avatar,
         "role": role_name,
         "role_id": current_user.role_id,
-        "department_id": current_user.department_id,
-        "status": current_user.status,
-        "joining_date": current_user.joining_date.isoformat() if current_user.joining_date else None,
-        "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+        "department_id": getattr(current_user, "department_id", None),
+        "status": getattr(current_user, "status", "Active"),
+        "joining_date": joining_date.isoformat() if joining_date else None,
+        "created_at": created_at.isoformat() if created_at else None,
     }
     return success_response(data=user_data, message="User profile retrieved successfully")

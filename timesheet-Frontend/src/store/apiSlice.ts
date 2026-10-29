@@ -15,11 +15,11 @@ if (!API_BASE_URL) {
 const baseQuery = fetchBaseQuery({
   baseUrl: API_BASE_URL,
   credentials: 'include',
-  timeout: 10000, // 10 second timeout to prevent infinite hanging
+  timeout: 30000, // 30 second timeout to accommodate Render cold starts & large uploads
   prepareHeaders: (headers, { getState }) => {
     const token = (getState() as RootState).auth?.token || (typeof window !== 'undefined' ? localStorage.getItem('access_token') : null);
     if (token) {
-      headers.set('Authorization', `Bearer ${token}`);
+      headers.set('Authorization', 'Bearer ' + token);
     }
     return headers;
   },
@@ -27,7 +27,7 @@ const baseQuery = fetchBaseQuery({
 
 const mutex = new Mutex();
 let lastRefreshFailTime = 0;
-const REFRESH_TIMEOUT = 10000; // 10 seconds
+const REFRESH_TIMEOUT = 30000; // 30 seconds
 
 const baseQueryWithReauth = async (args: any, api: any, extraOptions: any) => {
   await mutex.waitForUnlock();

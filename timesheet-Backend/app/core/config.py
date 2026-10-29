@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Any
 import urllib.parse
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
@@ -68,6 +68,7 @@ class Settings(BaseSettings):
 
     # CORS
     FRONTEND_URLS: List[str] = [
+        "https://super-time.vercel.app",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:5173",
@@ -75,6 +76,36 @@ class Settings(BaseSettings):
         "http://localhost:80",
         "http://localhost",
     ]
+
+    @field_validator("FRONTEND_URLS", mode="before")
+    @classmethod
+    def assemble_frontend_urls(cls, v: Any) -> List[str]:
+        if not v:
+            return [
+                "https://super-time.vercel.app",
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "http://localhost",
+            ]
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("[") and v.endswith("]"):
+                import json
+                try:
+                    urls = json.loads(v)
+                except Exception:
+                    urls = [u.strip().strip('"').strip("'") for u in v.strip("[]").split(",") if u.strip()]
+            else:
+                urls = [u.strip().strip('"').strip("'") for u in v.split(",") if u.strip()]
+        elif isinstance(v, (list, tuple)):
+            urls = list(v)
+        else:
+            urls = []
+
+        cleaned = [str(u).rstrip("/") for u in urls if u]
+        if "https://super-time.vercel.app" not in cleaned:
+            cleaned.append("https://super-time.vercel.app")
+        return cleaned
 
     # SMTP Email Settings
     SMTP_HOST: str = ""

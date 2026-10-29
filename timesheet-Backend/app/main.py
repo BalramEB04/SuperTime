@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import app.core.models  # noqa: F401
 from app.api.router import api_router
 from app.common.responses import error_response
 from app.core.config import settings

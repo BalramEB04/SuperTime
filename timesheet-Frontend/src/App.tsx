@@ -50,7 +50,7 @@ import {
   useDeallocateToolMutation,
 } from './store/api/dataApi';
 import { useGetCurrentUserQuery, useLogoutMutation } from './store/api/authApi';
-import { setCredentials } from './store/slices/authSlice';
+import { setCredentials, setUser } from './store/slices/authSlice';
 import { apiSlice } from './store/apiSlice';
 
 import {
@@ -110,11 +110,12 @@ export default function App() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const authAttemptedRef = React.useRef(false);
+  const hasToken = typeof window !== 'undefined' ? !!localStorage.getItem('access_token') : false;
 
-  // Attempt to restore session on load.
-  // Skip if we already have a user OR if we're in the middle of logging out.
+  // Attempt to restore/revalidate session on load.
+  // Skip if there is no token, or if we are logging out, or if auth already failed.
   const { data: userProfile, isLoading: isAuthLoading, isError } = useGetCurrentUserQuery(undefined, {
-    skip: !!currentUser || isLoggingOut || authAttemptedRef.current,
+    skip: !hasToken || isLoggingOut || authAttemptedRef.current,
   });
 
   if (isError) {
@@ -137,23 +138,35 @@ export default function App() {
   const urlPortal = normalizePortalMode(rawUrlPortal);
   const urlTab = searchParams.get('tab');
 
-  // If user profile is successfully fetched, set the credentials
+  // Ref to track last synced profile and prevent infinite re-render loop
+  const lastSyncedProfileRef = React.useRef<string | null>(null);
+
+  // If user profile is successfully fetched, set/update credentials
   React.useEffect(() => {
-    if (userProfile && !currentUser && !isLoggingOut) {
-      dispatch(setCredentials({ user: userProfile }));
-      // Restore portal mode: URL param > sessionStorage saved page > role default (set by setCredentials)
-      const validPortals = ['employee', 'pm', 'ac_manager', 'admin'];
-      if (urlPortal && validPortals.includes(urlPortal)) {
-        setTimeout(() => dispatch(setPortalMode(urlPortal)), 0);
-      } else {
-        // Try sessionStorage fallback for browser-close/reopen scenario
-        try {
-          const saved = JSON.parse(sessionStorage.getItem('ST_lastPage') || '{}');
-          const savedPortal = normalizePortalMode(saved.portal);
-          if (savedPortal && validPortals.includes(savedPortal)) {
-            setTimeout(() => dispatch(setPortalMode(savedPortal)), 0);
-          }
-        } catch { /* ignore */ }
+    if (userProfile && !isLoggingOut) {
+      const profileKey = String(userProfile.id) + '-' + String(userProfile.role) + '-' + String(userProfile.status);
+      if (lastSyncedProfileRef.current !== profileKey) {
+        lastSyncedProfileRef.current = profileKey;
+        if (!currentUser) {
+          dispatch(setCredentials({ user: userProfile }));
+        } else {
+          dispatch(setUser(userProfile));
+        }
+
+        // Restore portal mode: URL param > sessionStorage saved page > role default (set by setCredentials)
+        const validPortals = ['employee', 'pm', 'ac_manager', 'admin'];
+        if (urlPortal && validPortals.includes(urlPortal)) {
+          setTimeout(() => dispatch(setPortalMode(urlPortal)), 0);
+        } else {
+          // Try sessionStorage fallback for browser-close/reopen scenario
+          try {
+            const saved = JSON.parse(sessionStorage.getItem('ST_lastPage') || '{}');
+            const savedPortal = normalizePortalMode(saved.portal);
+            if (savedPortal && validPortals.includes(savedPortal)) {
+              setTimeout(() => dispatch(setPortalMode(savedPortal)), 0);
+            }
+          } catch { /* ignore */ }
+        }
       }
     }
   }, [userProfile, currentUser, dispatch, urlPortal, isLoggingOut]);
@@ -819,7 +832,7 @@ export default function App() {
       const next = !prev;
       try {
         localStorage.setItem('supertime_sidebar_collapsed', String(next));
-      } catch {}
+      } catch { }
       return next;
     });
   }, []);
@@ -892,11 +905,10 @@ export default function App() {
           onToggleCollapse={handleToggleSidebar}
         />
 
-        <main className={`flex-1 p-3 sm:p-4 lg:px-6 lg:py-3 w-full min-w-0 bg-[#edf2f7] flex flex-col ${
-          portalMode === 'employee' && activeEmployeeTab === 'timesheets_history'
+        <main className={`flex-1 p-3 sm:p-4 lg:px-6 lg:py-3 w-full min-w-0 bg-[#edf2f7] flex flex-col ${portalMode === 'employee' && activeEmployeeTab === 'timesheets_history'
             ? 'overflow-hidden'
             : 'overflow-y-auto'
-        }`}>
+          }`}>
           {portalMode === 'employee' && (
             <>
               {activeEmployeeTab === 'my_dashboard' && (
@@ -1054,7 +1066,7 @@ export default function App() {
                   editingEntry={editingTimesheet}
                   defaultDate={defaultSubmitDate}
                   initialOpenMarkLeave={false}
-                  onCloseMarkLeaveModal={() => {}}
+                  onCloseMarkLeaveModal={() => { }}
                   onClearEditing={() => setEditingTimesheet(null)}
                   onShowToast={showToast}
                 />
