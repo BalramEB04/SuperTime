@@ -1,6 +1,35 @@
-from typing import List
+from typing import List, Optional
+import urllib.parse
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
+
+
+def _clean_asyncpg_url(v: str | None) -> str:
+    if not v or not isinstance(v, str):
+        return "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/timesheet_db"
+    
+    url = v.strip().strip('"').strip("'")
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    parsed = urllib.parse.urlsplit(url)
+    query_params = urllib.parse.parse_qs(parsed.query)
+
+    # asyncpg doesn't accept libpq's channel_binding parameter
+    query_params.pop("channel_binding", None)
+
+    # Convert sslmode to ssl for asyncpg
+    if "sslmode" in query_params:
+        ssl_val = query_params.pop("sslmode")
+        if "ssl" not in query_params:
+            query_params["ssl"] = ssl_val
+
+    clean_query = urllib.parse.urlencode(query_params, doseq=True)
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, clean_query, parsed.fragment)
+    )
 
 
 class Settings(BaseSettings):
@@ -10,18 +39,23 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/timesheet_db"
+    DATABASE_URL_UNPOOLED: Optional[str] = None
     
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def assemble_db_url(cls, v: str | None) -> str:
         import os
         v = os.getenv("DATABASE_URL", v)
-        if isinstance(v, str):
-            if v.startswith("postgres://"):
-                return v.replace("postgres://", "postgresql+asyncpg://", 1)
-            if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
-                return v.replace("postgresql://", "postgresql+asyncpg://", 1)
-        return v or "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/timesheet_db"
+        return _clean_asyncpg_url(v)
+
+    @field_validator("DATABASE_URL_UNPOOLED", mode="before")
+    @classmethod
+    def assemble_unpooled_db_url(cls, v: str | None) -> Optional[str]:
+        import os
+        val = os.getenv("DATABASE_URL_UNPOOLED", v)
+        if val:
+            return _clean_asyncpg_url(val)
+        return None
 
     SECRET_KEY: str = "super_secret_key_change_me_in_production"
     ALGORITHM: str = "HS256"
@@ -30,17 +64,16 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
 
     # Default admin account seeded into the database on first run.
-    # Change this to your own work email before running seed_users.py.
     ADMIN_EMAIL: str = "admin@yourcompany.com"
 
-    # Add your production Vercel URL here or set FRONTEND_URLS env var on Render.
-    # Format for env var (JSON array string):
-    #   FRONTEND_URLS=["https://your-app.vercel.app"]
+    # CORS
     FRONTEND_URLS: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:80",
+        "http://localhost",
     ]
 
     # SMTP Email Settings
@@ -56,6 +89,26 @@ class Settings(BaseSettings):
     SLACK_WEBHOOK_URL: str = ""
     SLACK_CHANNEL_ID: str = ""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # Neon Services
+    NEON_BRANCH: str = "production"
+    NEON_AUTH_BASE_URL: str = ""
+    NEON_AUTH_JWKS_URL: str = ""
+    NEON_REALTIME_URL: str = ""
+    NEON_REALTIME_SECRET: str = ""
+    NEON_FUNCTION_HELLO_BASE_URL: str = ""
+
+    # Neon Object Storage (S3-compatible)
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_ENDPOINT_URL_S3: str = ""
+    AWS_REGION: str = "us-east-2"
+    NEON_STORAGE_BUCKET: str = "assets"
+
+    model_config = SettingsConfigDict(
+        env_file=(".env", "../.env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
 
 settings = Settings()

@@ -8,6 +8,7 @@ services:
     environment:
       - ENVIRONMENT=production
       - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_URL_UNPOOLED=${DATABASE_URL_UNPOOLED}
       - SECRET_KEY=${SECRET_KEY}
       - ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=30
@@ -19,6 +20,16 @@ services:
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_ENDPOINT_URL_S3=${AWS_ENDPOINT_URL_S3}
+      - AWS_REGION=${AWS_REGION:-us-east-2}
+      - NEON_BRANCH=${NEON_BRANCH:-production}
+      - NEON_AUTH_BASE_URL=${NEON_AUTH_BASE_URL}
+      - NEON_AUTH_JWKS_URL=${NEON_AUTH_JWKS_URL}
+      - NEON_REALTIME_URL=${NEON_REALTIME_URL}
+      - NEON_REALTIME_SECRET=${NEON_REALTIME_SECRET}
+      - NEON_FUNCTION_HELLO_BASE_URL=${NEON_FUNCTION_HELLO_BASE_URL}
     ports:
       - "8000:8000"
     volumes:
@@ -32,7 +43,7 @@ services:
       dockerfile: Dockerfile
       args:
         - VITE_API_BASE_URL=/api/v1
-        - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-146072997584-and6rpntvi6fi6gvvthkp8c37spr6snn.apps.googleusercontent.com}
+        - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
     container_name: timesheet-frontend
     restart: unless-stopped
     ports:
@@ -49,4 +60,3 @@ networks:
 
 volumes:
   backend-uploads:
-
