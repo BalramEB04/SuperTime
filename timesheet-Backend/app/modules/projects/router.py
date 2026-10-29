@@ -65,9 +65,13 @@ async def update_project(
 
 
 @router.delete("/{project_id}", response_model=dict, dependencies=[Depends(pm_only)])
-async def delete_project(project_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_project(
+    project_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
     service = ProjectService(db)
-    await service.delete_project(project_id)
+    await service.delete_project(project_id, current_user=current_user)
     return success_response(message="Project deleted successfully")
 
 
@@ -75,10 +79,11 @@ async def delete_project(project_id: int, db: AsyncSession = Depends(get_db)):
 async def upload_project_document(
     project_id: int,
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     service = ProjectService(db)
-    doc = await service.upload_document(project_id, file)
+    doc = await service.upload_document(project_id, file, current_user=current_user)
     return created_response(data=doc.model_dump(mode="json"), message="Document uploaded successfully")
 
 
@@ -86,8 +91,9 @@ async def upload_project_document(
 async def delete_project_document(
     project_id: int,
     document_id: int,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     service = ProjectService(db)
-    await service.delete_document(project_id, document_id)
+    await service.delete_document(project_id, document_id, current_user=current_user)
     return success_response(message="Document deleted successfully")

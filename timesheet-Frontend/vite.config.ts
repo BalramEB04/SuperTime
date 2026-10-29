@@ -24,12 +24,13 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      allowedHosts: true,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
         '/api': {
-          target: 'http://127.0.0.1:8000',
+          target: 'http://localhost:8000',
           changeOrigin: true,
         },
       },

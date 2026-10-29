@@ -128,14 +128,13 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
 
   // PM's projects (only active projects)
   const pmProjects = React.useMemo(() => {
-    return (projects || []).filter(
-      (p) =>
-        ((p.pmName && currentUser?.name && p.pmName.toLowerCase() === currentUser.name.toLowerCase()) ||
-          currentUser?.role === 'admin' ||
-          currentUser?.role === 'pm') &&
-        p.isActive !== false &&
-        p.is_active !== false
-    );
+    return (projects || []).filter((p) => {
+      if (p.isActive === false || p.is_active === false) return false;
+      if (currentUser?.role === 'admin') return true;
+      if (p.project_manager_id && currentUser?.id && String(p.project_manager_id) === String(currentUser.id)) return true;
+      if (p.pmName && currentUser?.name && p.pmName.trim().toLowerCase() === currentUser.name.trim().toLowerCase()) return true;
+      return false;
+    });
   }, [projects, currentUser]);
 
   // Handle bulk assign team submission

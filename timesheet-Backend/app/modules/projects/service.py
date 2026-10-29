@@ -41,11 +41,19 @@ class ProjectService:
         project = await self.repository.get_by_id(project_id)
         if not project:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        if self._is_pm(current_user) and project.project_manager_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You do not have permission to access another Project Manager's project."
+            )
         financials = await self.compute_financials_for_projects(self.db, [project], current_user=current_user)
         return financials[0]
 
     async def get_all_projects(self, skip: int = 0, limit: int = 100, is_active: Optional[bool] = None, current_user: Optional[User] = None) -> List[ProjectResponse]:
-        projects = await self.repository.get_all(skip=skip, limit=limit, is_active=is_active)
+        pm_filter = None
+        if self._is_pm(current_user):
+            pm_filter = current_user.id
+        projects = await self.repository.get_all(skip=skip, limit=limit, is_active=is_active, project_manager_id=pm_filter)
         return await self.compute_financials_for_projects(self.db, projects, current_user=current_user)
 
     @staticmethod
@@ -189,6 +197,10 @@ class ProjectService:
         return results
 
     async def create_project(self, project_in: ProjectCreate, current_user: Optional[User] = None) -> ProjectResponse:
+        # If current_user is a PM, force project_manager_id to be current_user.id so they cannot create projects for other PMs
+        if self._is_pm(current_user):
+            project_in.project_manager_id = current_user.id
+
         await self._validate_client_and_pm(project_in.client_id, project_in.project_manager_id)
         
         # Only AC Manager can enter or modify project budget
@@ -196,7 +208,14 @@ class ProjectService:
         if not is_ac_manager:
             project_in.budget = None
 
-        project = await self.repository.create(project_in)
+        try:
+            project = await self.repository.create(project_in)
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create project. A database constraint was violated."
+            )
         
         from app.modules.project_assignments.schema import ProjectAssignmentCreate
         from app.modules.project_assignments.repository import ProjectAssignmentRepository
@@ -219,6 +238,18 @@ class ProjectService:
         if not project:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
         
+        if self._is_pm(current_user):
+            if project.project_manager_id != current_user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Forbidden: You do not have permission to modify another Project Manager's project."
+                )
+            if project_in.project_manager_id is not None and project_in.project_manager_id != current_user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Forbidden: Project Managers cannot reassign project ownership."
+                )
+
         await self._validate_client_and_pm(project_in.client_id, project_in.project_manager_id)
         
         # Only AC Manager can modify project budget
@@ -226,21 +257,38 @@ class ProjectService:
         if not is_ac_manager:
             project_in.budget = None
 
-        updated_project = await self.repository.update(project, project_in)
+        try:
+            updated_project = await self.repository.update(project, project_in)
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to update project. A database constraint was violated."
+            )
         financials = await self.compute_financials_for_projects(self.db, [updated_project], current_user=current_user)
         return financials[0]
 
-    async def delete_project(self, project_id: int) -> None:
+    async def delete_project(self, project_id: int, current_user: Optional[User] = None) -> None:
         project = await self.repository.get_by_id(project_id)
         if not project:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        if self._is_pm(current_user) and project.project_manager_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You do not have permission to delete another Project Manager's project."
+            )
         
         await self.repository.soft_delete(project)
 
-    async def upload_document(self, project_id: int, file: UploadFile) -> ProjectDocumentResponse:
+    async def upload_document(self, project_id: int, file: UploadFile, current_user: Optional[User] = None) -> ProjectDocumentResponse:
         project = await self.repository.get_by_id(project_id)
         if not project:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        if self._is_pm(current_user) and project.project_manager_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot upload documents to another Project Manager's project."
+            )
 
         dest_dir = Path("uploads") / "projects" / str(project_id)
         saved_path = await save_upload_file(
@@ -264,7 +312,16 @@ class ProjectService:
         saved_doc = await self.repository.add_document(doc)
         return ProjectDocumentResponse.model_validate(saved_doc)
 
-    async def delete_document(self, project_id: int, document_id: int) -> None:
+    async def delete_document(self, project_id: int, document_id: int, current_user: Optional[User] = None) -> None:
+        project = await self.repository.get_by_id(project_id)
+        if not project:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        if self._is_pm(current_user) and project.project_manager_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot delete documents from another Project Manager's project."
+            )
+
         doc = await self.repository.get_document_by_id(document_id)
         if not doc or doc.project_id != project_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")

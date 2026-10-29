@@ -29,20 +29,25 @@ from app.modules.tools.model import Tool
 class EodReportService:
 
     @staticmethod
-    async def get_daily_eod_entries(db: AsyncSession, target_date: date) -> List[Dict[str, Any]]:
+    async def get_daily_eod_entries(db: AsyncSession, target_date: date, current_user: Optional[User] = None) -> List[Dict[str, Any]]:
         """
         Fetches all submitted timesheet entries for a specific date with joined
         employee, department, project, and assignment details.
         """
         stmt = (
             select(Timesheet)
+            .join(ProjectAssignment, Timesheet.project_assignment_id == ProjectAssignment.id)
+            .join(Project, ProjectAssignment.project_id == Project.id)
             .options(
                 selectinload(Timesheet.user).selectinload(User.department),
                 selectinload(Timesheet.project_assignment).selectinload(ProjectAssignment.project),
             )
             .where(Timesheet.timesheet_date == target_date)
-            .order_by(Timesheet.user_id, Timesheet.id)
         )
+        if current_user and current_user.role and current_user.role.name == "Project_Manager":
+            stmt = stmt.where(Project.project_manager_id == current_user.id)
+
+        stmt = stmt.order_by(Timesheet.user_id, Timesheet.id)
         result = await db.execute(stmt)
         timesheets = result.scalars().all()
 

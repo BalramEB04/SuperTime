@@ -27,6 +27,7 @@ interface PMWeekendWorkRequestsProps {
 
 export const PMWeekendWorkRequests: React.FC<PMWeekendWorkRequestsProps> = ({
   currentUser,
+  projects = [],
   weekendRequests = [],
   onApproveWeekendWork,
   onRejectWeekendWork,
@@ -41,7 +42,19 @@ export const PMWeekendWorkRequests: React.FC<PMWeekendWorkRequestsProps> = ({
 
   useEffect(() => { setCurrentPage(1); }, [statusFilter, searchTerm]);
 
+  const pmProjects = (projects || []).filter((p) => {
+    if (currentUser?.role === 'admin') return true;
+    if (p.project_manager_id && currentUser?.id && String(p.project_manager_id) === String(currentUser.id)) return true;
+    if (p.pmName && currentUser?.name && p.pmName.trim().toLowerCase() === currentUser.name.trim().toLowerCase()) return true;
+    return false;
+  });
+  const pmProjectIds = new Set(pmProjects.map((p) => String(p.id)));
+
   const filteredRequests = weekendRequests.filter((req) => {
+    if (currentUser?.role !== 'admin' && req.projectId && !pmProjectIds.has(String(req.projectId))) {
+      return false;
+    }
+
     const matchesSearch =
       (req.userName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (req.projectName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||

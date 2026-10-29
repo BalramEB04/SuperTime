@@ -142,12 +142,12 @@ export const PMTimesheetReview: React.FC<PMTimesheetReviewProps> = React.memo(({
 
   // PM's projects (all projects managed by PM, for timesheet record resolution)
   const allPmProjects = useMemo(() => {
-    return (projects || []).filter(
-      (p) =>
-        (p.pmName && currentUser?.name && p.pmName.toLowerCase() === currentUser.name.toLowerCase()) ||
-        currentUser?.role === 'admin' ||
-        currentUser?.role === 'pm'
-    );
+    return (projects || []).filter((p) => {
+      if (currentUser?.role === 'admin') return true;
+      if (p.project_manager_id && currentUser?.id && String(p.project_manager_id) === String(currentUser.id)) return true;
+      if (p.pmName && currentUser?.name && p.pmName.trim().toLowerCase() === currentUser.name.trim().toLowerCase()) return true;
+      return false;
+    });
   }, [projects, currentUser]);
 
   // Active PM Projects (only active projects should be visible in filters and compliance monitoring)
@@ -159,10 +159,11 @@ export const PMTimesheetReview: React.FC<PMTimesheetReviewProps> = React.memo(({
 
   // Filter timesheets for PM's managed projects
   const pmTimesheets = useMemo(() => {
-    return (timesheets || []).filter(
-      (t) => allPmProjectIds.length === 0 || allPmProjectIds.includes(t.projectId)
-    );
-  }, [timesheets, allPmProjectIds]);
+    return (timesheets || []).filter((t) => {
+      if (currentUser?.role === 'admin') return true;
+      return allPmProjectIds.includes(t.projectId);
+    });
+  }, [timesheets, allPmProjectIds, currentUser]);
 
   // Apply filters for review tab
   useEffect(() => {

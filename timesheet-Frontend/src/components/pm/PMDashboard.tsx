@@ -61,12 +61,12 @@ export const PMDashboard: React.FC<PMDashboardProps> = React.memo(({
     const safeAllUsers = allUsers || [];
 
     // PM's projects
-    const pProjects = safeProjects.filter(
-      (p) =>
-        (p.pmName && currentUser?.name && p.pmName.toLowerCase() === currentUser.name.toLowerCase()) ||
-        currentUser?.role === 'admin' ||
-        currentUser?.role === 'pm'
-    );
+    const pProjects = safeProjects.filter((p) => {
+      if (currentUser?.role === 'admin') return true;
+      if (p.project_manager_id && currentUser?.id && String(p.project_manager_id) === String(currentUser.id)) return true;
+      if (p.pmName && currentUser?.name && p.pmName.trim().toLowerCase() === currentUser.name.trim().toLowerCase()) return true;
+      return false;
+    });
 
     const pProjectIds = pProjects.map((p) => String(p.id));
 
@@ -78,14 +78,17 @@ export const PMDashboard: React.FC<PMDashboardProps> = React.memo(({
     }).length;
 
     // Pending Weekend Work Requests for PM's projects
-    const pendingRequests = safeWeekendRequests.filter(
-      (w) => w.status === 'pending' && (pProjectIds.length === 0 || pProjectIds.includes(String(w.projectId)))
-    );
+    const pendingRequests = safeWeekendRequests.filter((w) => {
+      if (w.status !== 'pending') return false;
+      if (currentUser?.role === 'admin') return true;
+      return pProjectIds.includes(String(w.projectId));
+    });
 
     // Timesheets for PM's projects (string-safe project matching)
-    const pTimesheets = safeTimesheets.filter(
-      (t) => pProjectIds.length === 0 || pProjectIds.includes(String(t.projectId))
-    );
+    const pTimesheets = safeTimesheets.filter((t) => {
+      if (currentUser?.role === 'admin') return true;
+      return pProjectIds.includes(String(t.projectId));
+    });
 
     // Calculations for stats
     const totLogged = pProjects.reduce((sum, p) => sum + p.loggedHours, 0);

@@ -7,6 +7,9 @@ from app.modules.tool_allocations.repository import ToolAllocationRepository
 from app.modules.tool_allocations.schema import ToolAllocationCreate, ToolAllocationUpdate, ToolAllocationResponse
 from app.modules.milestones.repository import MilestoneRepository
 from app.modules.tools.repository import ToolRepository
+from app.modules.projects.repository import ProjectRepository
+from app.modules.users.model import User
+from typing import Optional
 
 
 class ToolAllocationService:
@@ -15,12 +18,34 @@ class ToolAllocationService:
         self.repository = ToolAllocationRepository(db)
         self.milestone_repo = MilestoneRepository(db)
         self.tool_repo = ToolRepository(db)
+        self.project_repo = ProjectRepository(db)
 
-    async def allocate_tool(self, allocation_in: ToolAllocationCreate) -> ToolAllocationResponse:
+    @staticmethod
+    def _is_pm(user: Optional[User]) -> bool:
+        if not user or not user.role:
+            return False
+        return user.role.name == "Project_Manager"
+
+    async def _verify_milestone_pm(self, milestone_id: int, current_user: Optional[User]):
+        if not self._is_pm(current_user):
+            return
+        milestone = await self.milestone_repo.get_by_id(milestone_id)
+        if not milestone:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Milestone not found")
+        project = await self.project_repo.get_by_id(milestone.project_id)
+        if project and project.project_manager_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You cannot manage tools for another Project Manager's project."
+            )
+
+    async def allocate_tool(self, allocation_in: ToolAllocationCreate, current_user: Optional[User] = None) -> ToolAllocationResponse:
         # Check if milestone exists
         milestone = await self.milestone_repo.get_by_id(allocation_in.milestone_id)
         if not milestone:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Milestone not found")
+
+        await self._verify_milestone_pm(allocation_in.milestone_id, current_user)
 
         # Check if tool exists and is active
         tool = await self.tool_repo.get_by_id(allocation_in.tool_id)
@@ -35,11 +60,13 @@ class ToolAllocationService:
         allocation = await self.repository.create(allocation_in)
         return ToolAllocationResponse.model_validate(allocation)
 
-    async def get_milestone_allocations(self, milestone_id: int, skip: int = 0, limit: int = 100) -> List[ToolAllocationResponse]:
+    async def get_milestone_allocations(self, milestone_id: int, skip: int = 0, limit: int = 100, current_user: Optional[User] = None) -> List[ToolAllocationResponse]:
         # Check if milestone exists
         milestone = await self.milestone_repo.get_by_id(milestone_id)
         if not milestone:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Milestone not found")
+
+        await self._verify_milestone_pm(milestone_id, current_user)
             
         allocations = await self.repository.get_by_milestone(milestone_id, skip=skip, limit=limit)
         return [ToolAllocationResponse.model_validate(a) for a in allocations]
@@ -53,18 +80,22 @@ class ToolAllocationService:
         allocations = await self.repository.get_by_tool(tool_id, skip=skip, limit=limit)
         return [ToolAllocationResponse.model_validate(a) for a in allocations]
 
-    async def update_tool_allocation(self, allocation_id: int, allocation_in: ToolAllocationUpdate) -> ToolAllocationResponse:
+    async def update_tool_allocation(self, allocation_id: int, allocation_in: ToolAllocationUpdate, current_user: Optional[User] = None) -> ToolAllocationResponse:
         allocation = await self.repository.get_by_id(allocation_id)
         if not allocation:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool allocation not found")
+
+        await self._verify_milestone_pm(allocation.milestone_id, current_user)
 
         updated_allocation = await self.repository.update(allocation, allocation_in)
         return ToolAllocationResponse.model_validate(updated_allocation)
 
-    async def deallocate_tool(self, allocation_id: int) -> ToolAllocationResponse:
+    async def deallocate_tool(self, allocation_id: int, current_user: Optional[User] = None) -> ToolAllocationResponse:
         allocation = await self.repository.get_by_id(allocation_id)
         if not allocation:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool allocation not found")
+
+        await self._verify_milestone_pm(allocation.milestone_id, current_user)
         
         # Soft delete by setting status and deallocation date
         update_data = ToolAllocationUpdate(

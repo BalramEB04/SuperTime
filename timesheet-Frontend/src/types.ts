@@ -159,6 +159,7 @@ export interface Project {
   code: string;
   client: string;
   accountManagerName?: string;
+  project_manager_id?: number;
   pmName: string;
   pmAvatar: string;
   status: 'Milestone Planning' | 'Design' | 'Development' | 'UAT' | 'Completed' | 'active' | 'completed' | 'on_hold' | 'planning' | string;

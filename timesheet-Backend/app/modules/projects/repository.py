@@ -28,7 +28,13 @@ class ProjectRepository:
         )
         return result.scalars().first()
 
-    async def get_all(self, skip: int = 0, limit: int = 100, is_active: Optional[bool] = None) -> List[Project]:
+    async def get_all(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: Optional[bool] = None,
+        project_manager_id: Optional[int] = None,
+    ) -> List[Project]:
         query = (
             select(Project)
             .options(
@@ -41,6 +47,8 @@ class ProjectRepository:
         )
         if is_active is not None:
             query = query.where(Project.is_active == is_active)
+        if project_manager_id is not None:
+            query = query.where(Project.project_manager_id == project_manager_id)
         result = await self.db.execute(query.offset(skip).limit(limit))
         return list(result.scalars().all())
 
