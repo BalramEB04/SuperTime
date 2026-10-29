@@ -30,6 +30,8 @@ export const LoginPage: React.FC = () => {
          const authData = await loginWithGoogle(response.credential).unwrap();
          dispatch(setCredentials({
             user: authData.user,
+            accessToken: authData.accessToken || authData.access_token,
+            refreshToken: authData.refreshToken || authData.refresh_token,
          }));
       } catch (err: any) {
          setAuthError(err?.data?.message || err.message || 'Google SSO Authentication failed');
