@@ -7,14 +7,6 @@ interface AuthState {
   portalMode: ActivePortalMode;
 }
 
-const savedToken = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-
-const initialState: AuthState = {
-  user: null,
-  token: savedToken,
-  portalMode: 'employee',
-};
-
 function sanitizePortalMode(roleOrMode: string | undefined): ActivePortalMode {
   if (!roleOrMode) return 'employee';
   const r = String(roleOrMode).toLowerCase();
@@ -23,6 +15,27 @@ function sanitizePortalMode(roleOrMode: string | undefined): ActivePortalMode {
   if (r.includes('account') || r === 'ac_manager') return 'ac_manager';
   return 'employee';
 }
+
+function getSavedUser(): User | null {
+  if (typeof window === 'undefined') return null;
+  const token = localStorage.getItem('access_token');
+  if (!token) return null;
+  try {
+    const raw = localStorage.getItem('SuperTime_current_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+const savedUser = getSavedUser();
+const savedToken = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+
+const initialState: AuthState = {
+  user: savedUser,
+  token: savedToken,
+  portalMode: sanitizePortalMode(savedUser?.role),
+};
 
 const authSlice = createSlice({
   name: 'auth',
@@ -47,6 +60,9 @@ const authSlice = createSlice({
         role: normalizedRole,
       };
       state.portalMode = sanitizePortalMode(user.role);
+      try {
+        localStorage.setItem('SuperTime_current_user', JSON.stringify(state.user));
+      } catch { /* ignore storage quota error */ }
     },
     logout: (state) => {
       state.user = null;
@@ -60,9 +76,19 @@ const authSlice = createSlice({
       state.portalMode = sanitizePortalMode(action.payload);
     },
     setUser: (state, action: PayloadAction<User>) => {
-      state.user = action.payload;
-      if (!state.user) {
+      if (action.payload) {
+        const normalizedRole = sanitizePortalMode(action.payload.role) as any;
+        state.user = {
+          ...action.payload,
+          role: normalizedRole,
+        };
+        try {
+          localStorage.setItem('SuperTime_current_user', JSON.stringify(state.user));
+        } catch { /* ignore */ }
+      } else {
+        state.user = null;
         state.portalMode = 'employee';
+        localStorage.removeItem('SuperTime_current_user');
       }
     }
   },
