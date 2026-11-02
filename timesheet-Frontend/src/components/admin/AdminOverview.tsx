@@ -108,7 +108,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                         className="px-4 py-2 bg-primary hover:bg-primary-hover text-primary-foreground font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-95"
                     >
                         <Plus className="w-4 h-4" />
-                        <span>New Entry</span>
+                        <span>Add Employee</span>
                     </button>
                     <button
                         onClick={() => onShowToast('Export Started', 'Exporting SuperTime dashboard summary report (CSV)...', 'info')}
@@ -334,7 +334,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                                 <X className="w-5 h-5 text-slate-500" />
                             </button>
                         </div>
-                        
+
                         <div className="p-6 overflow-y-auto">
                             <UpcomingLeavesWidget />
                         </div>

@@ -13,6 +13,7 @@ import {
   AlertCircle,
   RefreshCw,
   PanelLeft,
+  ArrowLeft,
 } from 'lucide-react';
 import { formatINR } from '../utils/formatters';
 import { useGetNotificationsQuery, useClearNotificationsMutation } from '../store/api/dataApi';
@@ -27,6 +28,11 @@ interface HeaderProps {
   onLogout: () => void;
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
+  previousTab?: {
+    tab: string;
+    label: string;
+    onGoBack: () => void;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +108,7 @@ export const Header: React.FC<HeaderProps> = React.memo(({
   onLogout,
   isSidebarCollapsed,
   onToggleSidebar,
+  previousTab,
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -227,6 +234,19 @@ export const Header: React.FC<HeaderProps> = React.memo(({
             aria-label="Toggle sidebar"
           >
             <PanelLeft className="w-5 h-5" />
+          </button>
+        )}
+
+        {/* Previous Tab Back Button */}
+        {previousTab && (
+          <button
+            type="button"
+            onClick={previousTab.onGoBack}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 text-slate-700 hover:text-blue-700 text-xs font-bold transition-all shadow-2xs group cursor-pointer active:scale-95 ml-1"
+            title={`Go back to ${previousTab.label}`}
+          >
+            <ArrowLeft className="w-3.5 h-3.5 text-slate-500 group-hover:text-blue-600 group-hover:-translate-x-0.5 transition-transform" />
+            <span>Go Back</span>
           </button>
         )}
       </div>
