@@ -136,12 +136,52 @@ class UserService:
 
         # Validate status if updating
         if "status" in update_dict:
-            update_dict["status"] = UserValidator.validate_status(update_dict["status"])
+            validated_st = UserValidator.validate_status(update_dict["status"])
+            if validated_st == "Inactive" and (user.role_id == 1 or (user.role and user.role.name == "Admin")):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Admin accounts cannot be deactivated.",
+                )
+            update_dict["status"] = validated_st
 
         return await UserRepository.update(db, user, update_dict)
 
     @staticmethod
     async def toggle_user_status(db: AsyncSession, user_id: int, new_status: str) -> User:
         user = await UserService.get_user_by_id(db, user_id)
+        if user.role_id == 1 or (user.role and user.role.name == "Admin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin accounts cannot be deactivated.",
+            )
         validated_status = UserValidator.validate_status(new_status)
         return await UserRepository.toggle_status(db, user, validated_status)
+
+    @staticmethod
+    async def delete_user(db: AsyncSession, user_id: int, current_admin_id: int) -> None:
+        if user_id == current_admin_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot delete your own account.",
+            )
+        user = await UserService.get_user_by_id(db, user_id)
+        if user.role_id == 1 or (user.role and user.role.name == "Admin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin accounts cannot be deleted.",
+            )
+
+        from app.modules.leave_balances.model import LeaveBalance
+        from app.modules.leave_requests.model import LeaveRequest
+        from app.modules.project_assignments.model import ProjectAssignment
+        from app.modules.milestones.assignment_model import MilestoneAssignment
+        from app.modules.timesheets.model import Timesheet
+        from sqlalchemy import delete
+
+        await db.execute(delete(LeaveBalance).where(LeaveBalance.user_id == user_id))
+        await db.execute(delete(LeaveRequest).where(LeaveRequest.user_id == user_id))
+        await db.execute(delete(Timesheet).where(Timesheet.user_id == user_id))
+        await db.execute(delete(MilestoneAssignment).where(MilestoneAssignment.user_id == user_id))
+        await db.execute(delete(ProjectAssignment).where(ProjectAssignment.user_id == user_id))
+
+        await UserRepository.delete(db, user)

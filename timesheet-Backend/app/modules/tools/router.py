@@ -20,9 +20,9 @@ async def create_tool(tool_in: ToolCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("", response_model=dict, dependencies=[Depends(view_tools_roles)])
-async def get_tools(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+async def get_tools(skip: int = 0, limit: int = 100, active_only: bool = False, db: AsyncSession = Depends(get_db)):
     service = ToolService(db)
-    tools = await service.get_all_tools(skip=skip, limit=limit)
+    tools = await service.get_all_tools(skip=skip, limit=limit, active_only=active_only)
     return success_response(data=[t.model_dump(mode="json") for t in tools], message="Tools retrieved successfully")
 
 

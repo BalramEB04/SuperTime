@@ -20,6 +20,14 @@ class TimesheetValidator:
             raise BadRequestException(detail="Cannot log timesheets for future dates.")
 
     @staticmethod
+    def validate_not_before_joining_date(joining_date: Optional[date], timesheet_date: date) -> None:
+        if joining_date and timesheet_date < joining_date:
+            raise BadRequestException(
+                detail=f"Cannot submit timesheet for {timesheet_date}. "
+                       f"Submissions are only permitted on or after your joining date ({joining_date})."
+            )
+
+    @staticmethod
     async def validate_submission_window(db: AsyncSession, timesheet_date: date) -> None:
         today = date.today()
         if timesheet_date > today:

@@ -121,8 +121,8 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
             </div>
 
             {/* Bento Grid - Overview Cards with 3D Tilt */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                {/* Active Users with 3D Tilt */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* Active Users with 3D Tilt (Non-clickable) */}
                 <TiltCard maxRotation={7} className="bg-white/90 backdrop-blur-md border border-slate-200/90 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
                     <div className="flex items-center justify-between mb-2">
                         <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
@@ -138,11 +138,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <h3 className="text-2xl font-black text-slate-900 mt-1">{activeUsersCount || 0}</h3>
                 </TiltCard>
 
-                {/* Upcoming Leaves Summary with 3D Tilt */}
+                {/* Leave Count with 3D Tilt (Non-clickable) */}
                 <TiltCard
                     maxRotation={7}
-                    onClick={() => setShowLeavesModal(true)}
-                    className="bg-white/90 backdrop-blur-md border border-slate-200/90 p-5 rounded-2xl shadow-sm hover:shadow-md hover:border-blue-300 transition-all text-left cursor-pointer"
+                    className="bg-white/90 backdrop-blur-md border border-slate-200/90 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow"
                 >
                     <div className="flex items-center justify-between mb-2">
                         <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
@@ -150,14 +149,14 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                         </div>
                     </div>
                     <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                        Team Leaves
+                        Leave Count
                     </p>
                     <h3 className="text-2xl font-black text-slate-900 mt-1">
                         {upcomingLeavesCount}
                     </h3>
                 </TiltCard>
 
-                {/* Next Holiday with 3D Tilt */}
+                {/* Next Holiday with 3D Tilt (Non-clickable) */}
                 <TiltCard maxRotation={7} className="bg-white/90 backdrop-blur-md border border-slate-200/90 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
                     <div className="flex items-center justify-between mb-2">
                         <div className="p-2 bg-slate-100 text-slate-600 rounded-xl">
@@ -170,19 +169,6 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <h3 className="text-2xl font-black text-slate-900 mt-1">
                         {nextHoliday ? `${nextHoliday.days_remaining} Days` : 'N/A'}
                     </h3>
-                </TiltCard>
-
-                {/* On Leave Today with 3D Tilt */}
-                <TiltCard maxRotation={7} className="bg-white/90 backdrop-blur-md border border-slate-200/90 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-center justify-between mb-2">
-                        <div className="p-2 bg-rose-50 text-rose-600 rounded-xl">
-                            <UserX className="w-4 h-4" />
-                        </div>
-                    </div>
-                    <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                        On Leave Today
-                    </p>
-                    <h3 className="text-2xl font-black text-slate-900 mt-1">{onLeaveUsersCount}</h3>
                 </TiltCard>
             </div>
 

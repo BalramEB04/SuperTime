@@ -104,6 +104,8 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
   minDateObj.setDate(minDateObj.getDate() - maxPastDays);
   const minAllowedDate = minDateObj.toISOString().split('T')[0];
 
+  const employeeJoinDate = currentUser.joinDate || (currentUser as any).joining_date || '';
+
   // Fetch leave requests for leave status visualization
   const { data: leaveData } = useGetMyLeaveRequestsQuery(undefined as any);
   const myLeaves: LeaveRequest[] = leaveData || [];
@@ -379,11 +381,13 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
               const isWorkDay = !isWeekend && !holidayForDay && !isFullDayLeave;
               const isZeroHours = dayTotalHours === 0;
 
-              // Valid window missing timesheet: past date within allowed cutoff window (still submittable)
-              const isMissingTimesheet = !isFutureDate && dateStr < todayStr && dateStr >= minAllowedDate && isWorkDay && isZeroHours;
+              const isBeforeJoining = Boolean(employeeJoinDate && dateStr < employeeJoinDate);
 
-              // Expired timesheet: past date before allowed cutoff window (submission window expired)
-              const isExpiredTimesheet = !isFutureDate && dateStr < minAllowedDate && isWorkDay && isZeroHours;
+              // Valid window missing timesheet: past date on/after joining date within allowed cutoff window (still submittable)
+              const isMissingTimesheet = !isFutureDate && dateStr < todayStr && dateStr >= minAllowedDate && !isBeforeJoining && isWorkDay && isZeroHours;
+
+              // Expired timesheet: past date on/after joining date that missed the submission cutoff window
+              const isExpiredTimesheet = !isFutureDate && !isBeforeJoining && dateStr < minAllowedDate && isWorkDay && isZeroHours;
 
               return (
                 <button
@@ -398,6 +402,15 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
                       }
                       if (holidayForDay) {
                         onShowToast('Company Holiday', `This date is a company holiday (${holidayForDay.name}). Timesheet logging is disabled.`, 'info');
+                        setSelectedDateModal(dateStr);
+                        return;
+                      }
+                      if (isBeforeJoining) {
+                        onShowToast(
+                          'Pre-Joining Date',
+                          `You joined on ${employeeJoinDate}. Timesheet logging is only applicable from your date of joining.`,
+                          'info'
+                        );
                         setSelectedDateModal(dateStr);
                         return;
                       }
@@ -425,7 +438,9 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
                           ? 'bg-purple-50/70 border-purple-200 hover:border-purple-400 hover:scale-[1.01] hover:shadow-sm cursor-pointer'
                           : isWeekend
                             ? 'bg-slate-50 border-slate-200/60 opacity-60 hover:scale-[1.01] hover:shadow-sm cursor-pointer'
-                            : dayTotalHours >= 8
+                            : isBeforeJoining
+                              ? 'bg-slate-50/70 border-slate-200/60 opacity-60 hover:border-slate-300 hover:scale-[1.01] cursor-pointer'
+                              : dayTotalHours >= 8
                               ? 'bg-emerald-50/50 border-emerald-200 hover:border-emerald-400 hover:scale-[1.01] hover:shadow-sm cursor-pointer'
                               : dayTotalHours > 0
                                 ? 'bg-amber-50/50 border-amber-200 hover:border-amber-400 hover:scale-[1.01] hover:shadow-sm cursor-pointer'
@@ -439,7 +454,7 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
                   }`}
                 >
                   <div className="flex items-center justify-between w-full shrink-0">
-                    <span className={`text-[11px] font-extrabold ${isExpiredTimesheet ? 'text-red-950 font-black' : isMissingTimesheet ? 'text-slate-700 font-bold' : 'text-slate-900'}`}>
+                    <span className={`text-[11px] font-extrabold ${isExpiredTimesheet ? 'text-red-950 font-black' : isBeforeJoining ? 'text-slate-400 font-medium' : isMissingTimesheet ? 'text-slate-700 font-bold' : 'text-slate-900'}`}>
                       {dateStr.split('-')[2]}
                     </span>
                     {dayTotalHours > 0 && (
@@ -498,7 +513,9 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
                       </div>
                     )}
                     {dayEntries.length === 0 && !leaveForDay && !holidayForDay && !isWeekend && !isFutureDate && (
-                      isExpiredTimesheet ? (
+                      isBeforeJoining ? (
+                        <span className="text-[9px] text-slate-400 font-medium italic">Pre-joining</span>
+                      ) : isExpiredTimesheet ? (
                         <span className="text-[9px] text-red-600 font-bold flex items-center gap-0.5">
                           <AlertCircle className="w-2.5 h-2.5 text-red-500 shrink-0" />
                           <span>Expired</span>
@@ -690,9 +707,13 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">
-                  {modalEntries.length === 0 && selectedDateModal && selectedDateModal < minAllowedDate
-                    ? `Expired Timesheet • ${selectedDateModal}`
-                    : `Timesheet Logs • ${selectedDateModal}`}
+                  {modalEntries.length === 0 && selectedDateModal && (
+                    Boolean(employeeJoinDate && selectedDateModal < employeeJoinDate)
+                      ? `Pre-Joining • ${selectedDateModal}`
+                      : selectedDateModal < minAllowedDate
+                        ? `Expired Timesheet • ${selectedDateModal}`
+                        : `Timesheet Logs • ${selectedDateModal}`
+                  )}
                 </h3>
                 <p className="text-xs text-slate-500">
                   Total Logged:{' '}
@@ -758,6 +779,28 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
                       <p className="text-orange-800 text-[11px] max-w-xs mx-auto">
                         Timesheet logging is disabled on official company holidays.
                       </p>
+                    </div>
+                  );
+                }
+
+                const isPriorToJoin = Boolean(selectedDateModal && employeeJoinDate && selectedDateModal < employeeJoinDate);
+                if (isPriorToJoin) {
+                  return (
+                    <div className="text-center py-6 text-slate-600 text-xs space-y-3 bg-slate-50 rounded-2xl border border-slate-200 p-5 shadow-xs">
+                      <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 text-slate-600 flex items-center justify-center font-bold">
+                        <Info className="w-6 h-6 text-slate-500" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-slate-200/80 text-slate-700 border border-slate-300">
+                          Pre-Joining Date
+                        </span>
+                        <p className="font-extrabold text-sm text-slate-950">
+                          Pre-Joining Date ({selectedDateModal})
+                        </p>
+                        <p className="text-slate-600 text-xs max-w-sm mx-auto leading-relaxed">
+                          Your official date of joining is <span className="font-bold text-slate-900">{employeeJoinDate}</span>. No timesheet logging is required or applicable for dates prior to your onboarding.
+                        </p>
+                      </div>
                     </div>
                   );
                 }

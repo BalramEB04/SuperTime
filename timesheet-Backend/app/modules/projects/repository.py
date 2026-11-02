@@ -73,6 +73,10 @@ class ProjectRepository:
         await self.db.refresh(project)
         return project
 
+    async def delete(self, project: Project) -> None:
+        await self.db.delete(project)
+        await self.db.commit()
+
     async def add_document(self, document: ProjectDocument) -> ProjectDocument:
         self.db.add(document)
         await self.db.commit()

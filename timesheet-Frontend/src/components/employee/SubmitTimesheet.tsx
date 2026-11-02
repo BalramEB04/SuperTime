@@ -93,6 +93,11 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
   minDateObj.setDate(minDateObj.getDate() - maxPastDays);
   const minAllowedDate = minDateObj.toISOString().split('T')[0];
 
+  const employeeJoinDate = currentUser.joinDate || (currentUser as any).joining_date || '';
+  const effectiveMinAllowedDate = employeeJoinDate && employeeJoinDate > minAllowedDate
+    ? employeeJoinDate
+    : minAllowedDate;
+
   useEffect(() => {
     if (initialOpenMarkLeave) {
       setShowMarkLeaveModal(true);
@@ -125,10 +130,12 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
         nonBillableDescription: editingEntry.nonBillableDescription || '',
       }];
     }
+    const initialDate = defaultDate || today;
+    const resolvedInitialDate = employeeJoinDate && initialDate < employeeJoinDate ? employeeJoinDate : initialDate;
     return [{
       projectId: '',
       milestoneId: '',
-      date: defaultDate || today,
+      date: resolvedInitialDate,
       billableHours: 0,
       nonBillableHours: 0,
       billableDescription: '',
@@ -482,11 +489,21 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
       return;
     }
 
-    const isLockedDate = rows.some((r) => r.date < minAllowedDate);
+    const isBeforeJoining = Boolean(employeeJoinDate && rows.some((r) => r.date < employeeJoinDate));
+    if (isBeforeJoining) {
+      onShowToast(
+        'Invalid Submission Date',
+        `Timesheet submission is only allowed on or after your joining date (${employeeJoinDate}).`,
+        'error'
+      );
+      return;
+    }
+
+    const isLockedDate = rows.some((r) => r.date < effectiveMinAllowedDate);
     if (isLockedDate) {
       onShowToast(
         'Submission Locked',
-        `Timesheet submission is locked for dates older than ${lockHours} hours (${minAllowedDate}). Please contact your Project Manager or Admin.`,
+        `Timesheet submission is locked for dates older than the allowed cutoff window (${effectiveMinAllowedDate}). Please contact your Project Manager or Admin.`,
         'error'
       );
       return;
@@ -937,14 +954,14 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                         <Calendar className="w-3 h-3 text-slate-500" />
                         <span>Date</span>
                       </span>
-                      <span className="text-[8.5px] text-slate-400 font-medium" title={`Configured lock cutoff: within past ${lockHours} hours`}>
-                        &ge; {minAllowedDate.slice(5)}
+                      <span className="text-[8.5px] text-slate-400 font-medium" title={`Allowed submission window: on or after ${effectiveMinAllowedDate}`}>
+                        &ge; {effectiveMinAllowedDate.slice(5)}
                       </span>
                     </label>
                     <input
                       type="date"
                       value={row.date}
-                      min={minAllowedDate}
+                      min={effectiveMinAllowedDate}
                       max={today}
                       onChange={(e) => handleRowChange(idx, 'date', e.target.value)}
                       disabled={!!editingEntry}

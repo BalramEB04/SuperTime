@@ -187,7 +187,14 @@ class ProjectService:
 
             resp = ProjectResponse.model_validate(p)
             resp.milestones = m_responses
-            resp.completion_percentage = sum([m.weight_percentage for m in p.milestones if m.status == "achieved"])
+            total_progress = 0.0
+            for m in p.milestones:
+                if str(m.status).lower() == "achieved":
+                    total_progress += m.weight_percentage
+                elif str(m.status).lower() == "in_progress":
+                    m_prog = getattr(m, "completion_percentage", 0.0) or 35.0
+                    total_progress += (m.weight_percentage * (m_prog / 100.0))
+            resp.completion_percentage = round(min(100.0, total_progress), 1)
             resp.logged_hours = fin_data["logged_hours"]
             resp.cost = project_ac
             resp.actual_cost = project_ac
@@ -299,7 +306,43 @@ class ProjectService:
                 detail="Forbidden: You do not have permission to delete another Project Manager's project."
             )
         
-        await self.repository.soft_delete(project)
+        from app.modules.timesheets.model import Timesheet
+        from app.modules.project_assignments.model import ProjectAssignment
+        from app.modules.weekend_work.model import WeekendWorkRequest
+        from sqlalchemy import select, delete
+
+        # 1. Fetch all project assignments
+        assignment_res = await self.db.execute(
+            select(ProjectAssignment.id).where(ProjectAssignment.project_id == project_id)
+        )
+        assignment_ids = list(assignment_res.scalars().all())
+        if assignment_ids:
+            # 2. Delete all timesheets logged under this project's assignments
+            await self.db.execute(
+                delete(Timesheet).where(Timesheet.project_assignment_id.in_(assignment_ids))
+            )
+            # 3. Delete any weekend work requests tied to this project's assignments
+            await self.db.execute(
+                delete(WeekendWorkRequest).where(WeekendWorkRequest.project_assignment_id.in_(assignment_ids))
+            )
+            # 4. Delete the project assignments
+            await self.db.execute(
+                delete(ProjectAssignment).where(ProjectAssignment.id.in_(assignment_ids))
+            )
+
+        # 5. Clean up uploaded physical files
+        for doc in (project.documents or []):
+            try:
+                if storage_service.is_configured and not doc.file_path.startswith("/uploads") and not doc.file_path.startswith("http"):
+                    storage_service.delete_file(doc.file_path)
+                else:
+                    rel_path = doc.file_path.lstrip("/")
+                    delete_file(rel_path)
+            except Exception:
+                pass
+
+        # 6. Hard delete the project (milestones, milestone_assignments, tool_allocations, project_documents cascade)
+        await self.repository.delete(project)
 
     async def upload_document(self, project_id: int, file: UploadFile, current_user: Optional[User] = None) -> ProjectDocumentResponse:
         project = await self.repository.get_by_id(project_id)

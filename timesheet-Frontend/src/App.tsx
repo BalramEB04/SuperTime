@@ -339,7 +339,7 @@ export default function App() {
   const isPm = currentUser?.role === 'pm';
 
   const { data: users = [] } = useGetUsersQuery(undefined, { skip });
-  const { data: projects = [] } = useGetProjectsQuery(undefined, { skip });
+  const { data: projects = [], refetch: refetchProjects } = useGetProjectsQuery(undefined, { skip });
   const { data: clients = [] } = useGetClientsQuery(undefined, { skip: skip || (!isPm && !isAdmin) });
   const { data: myTimesheets = [] } = useGetTimesheetsQuery(undefined, { skip });
   const { data: managedTimesheets = [] } = useGetManagedTimesheetsQuery(undefined, { skip: skip || !isPm });
@@ -617,9 +617,15 @@ export default function App() {
     }
   }, [createClientMutation, showToast]);
 
+  const isCreatingProjectRef = React.useRef(false);
   const handleAddProject = React.useCallback(async (newProj: Omit<Project, 'id'>) => {
     if (!currentUser) return;
+    if (isCreatingProjectRef.current) {
+      showToast('Please wait', 'Project creation is already in progress. Please wait a moment.', 'warning');
+      return;
+    }
     try {
+      isCreatingProjectRef.current = true;
       const res = await createProjectMutation({
         client_id: newProj.client ? Number(newProj.client) : undefined,
         project_manager_id: Number(currentUser.id),
@@ -634,8 +640,28 @@ export default function App() {
     } catch (e: any) {
       showToast('Action Failed', getErrorMessage(e, 'Failed to create project'), 'error');
       throw e;
+    } finally {
+      isCreatingProjectRef.current = false;
     }
   }, [currentUser, createProjectMutation, showToast]);
+
+  const isDeletingProjectRef = React.useRef(false);
+  const handleDeleteProject = React.useCallback(async (projectId: string) => {
+    if (isDeletingProjectRef.current) {
+      showToast('Please wait', 'Project deletion is already in progress.', 'warning');
+      return;
+    }
+    try {
+      isDeletingProjectRef.current = true;
+      await deleteProjectMutation(projectId).unwrap();
+      showToast('Project Deleted', 'Project permanently deleted successfully', 'success');
+    } catch (e: any) {
+      showToast('Action Failed', getErrorMessage(e, 'Failed to delete project'), 'error');
+      throw e;
+    } finally {
+      isDeletingProjectRef.current = false;
+    }
+  }, [deleteProjectMutation, showToast]);
 
   const handleUpdateProject = React.useCallback(async (updatedProj: Project) => {
     try {
@@ -1029,6 +1055,7 @@ export default function App() {
                   timesheets={timesheets}
                   onAddProject={handleAddProject}
                   onUpdateProject={handleUpdateProject}
+                  onDeleteProject={handleDeleteProject}
                   onCreateClient={handleCreateClient}
                   onAssignUserToProject={handleAssignUserToProject}
                   onRemoveUserFromProject={handleRemoveUserFromProject}

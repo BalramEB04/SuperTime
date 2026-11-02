@@ -25,7 +25,8 @@ class TimesheetService:
         current_user: User,
         timesheet_in: TimesheetCreate,
     ) -> Timesheet:
-        # 1. Validate date submission window (enforcing admin lock hours), not a weekend, and not a holiday
+        # 1. Validate date submission window (enforcing admin lock hours), joining date, not a weekend, and not a holiday
+        TimesheetValidator.validate_not_before_joining_date(current_user.joining_date, timesheet_in.timesheet_date)
         await TimesheetValidator.validate_submission_window(db, timesheet_in.timesheet_date)
         TimesheetValidator.validate_not_weekend(timesheet_in.timesheet_date)
         await TimesheetValidator.validate_not_holiday(db, timesheet_in.timesheet_date)
@@ -165,6 +166,7 @@ class TimesheetService:
         target_assignment = update_data.get("project_assignment_id", entry.project_assignment_id)
 
         if "timesheet_date" in update_data:
+            TimesheetValidator.validate_not_before_joining_date(current_user.joining_date, target_date)
             await TimesheetValidator.validate_submission_window(db, target_date)
             TimesheetValidator.validate_not_weekend(target_date)
             await TimesheetValidator.validate_not_holiday(db, target_date)

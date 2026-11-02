@@ -268,6 +268,15 @@ export async function toggleUserStatusApi(userId: number, status: 'Active' | 'In
   return handleResponse<BackendUser>(res);
 }
 
+export async function deleteUserApi(userId: number): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/users/${userId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: authHeader(),
+  });
+  await handleResponse<any>(res);
+}
+
 // ---------------------------------------------------------------------------
 // Roles API
 // ---------------------------------------------------------------------------
