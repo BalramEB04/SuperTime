@@ -286,8 +286,15 @@ export const dataApi = apiSlice.injectEndpoints({
       query: ({ id, ...body }) => ({ url: `/projects/${id}`, method: 'PUT', body }),
       invalidatesTags: ['Project'],
     }),
-    deleteProject: builder.mutation<void, string>({
-      query: (id) => ({ url: `/projects/${id}`, method: 'DELETE' }),
+    deleteProject: builder.mutation<void, string | { projectId: string; permanent?: boolean }>({
+      query: (arg) => {
+        const id = typeof arg === 'string' ? arg : arg.projectId;
+        const permanent = typeof arg === 'string' ? false : Boolean(arg.permanent);
+        return {
+          url: `/projects/${id}?permanent=${permanent}`,
+          method: 'DELETE',
+        };
+      },
       invalidatesTags: ['Project'],
     }),
 

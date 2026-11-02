@@ -150,7 +150,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
         projectId: '',
         milestoneId: '',
         date: today,
-        billableHours: 2.0,
+        billableHours: 0,
         nonBillableHours: 0,
         billableDescription: '',
         nonBillableDescription: '',
@@ -193,11 +193,11 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
     let num = parseFloat(rawValue);
     if (isNaN(num) || num < 0) {
       num = 0;
-    } else if (num > 8) {
-      num = 8;
+    } else if (num > 24) {
+      num = 24;
       onShowToast(
         'Maximum Limit Exceeded',
-        `${field === 'billableHours' ? 'Billable' : 'Non-billable'} hours cannot exceed 8.0 hours per entry.`,
+        `${field === 'billableHours' ? 'Billable' : 'Non-billable'} hours cannot exceed 24.0 hours per entry.`,
         'warning'
       );
     }
@@ -469,23 +469,24 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
       onShowToast('Leave Day', 'You are on full-day leave. Timesheet submission is not allowed.', 'error');
       return;
     }
-    if (grandTotal < effectiveMinHours) {
-      onShowToast('Validation Error', `You must log a minimum of ${effectiveMinHours.toFixed(1)} hours for this day.`, 'error');
+    const minRequiredHours = leaveStatus?.has_leave ? leaveStatus.available_hours : 8.0;
+    if (grandTotal < minRequiredHours) {
+      onShowToast('Validation Error', `Minimum ${minRequiredHours.toFixed(1)} hours (billable + non-billable) must be logged for this day.`, 'error');
       return;
     }
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      if (Number(r.billableHours) > 8) {
-        onShowToast('Validation Error', `Row ${i + 1}: Billable hours cannot exceed 8.0 hours.`, 'error');
+      if (Number(r.billableHours) > 24) {
+        onShowToast('Validation Error', `Row ${i + 1}: Billable hours cannot exceed 24.0 hours.`, 'error');
         return;
       }
-      if (Number(r.nonBillableHours) > 8) {
-        onShowToast('Validation Error', `Row ${i + 1}: Non-billable hours cannot exceed 8.0 hours.`, 'error');
+      if (Number(r.nonBillableHours) > 24) {
+        onShowToast('Validation Error', `Row ${i + 1}: Non-billable hours cannot exceed 24.0 hours.`, 'error');
         return;
       }
     }
-    if (grandTotal > 8) {
-      onShowToast('Validation Error', 'Total daily hours (billable + non-billable) cannot exceed 8.0 hours.', 'error');
+    if (grandTotal > 24.0) {
+      onShowToast('Validation Error', 'Total daily hours (billable + non-billable) cannot exceed 24.0 hours.', 'error');
       return;
     }
 
@@ -517,18 +518,24 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
         return;
       }
 
-      if (Number(row.billableHours) > 8) {
-        onShowToast('Validation Error', 'Billable hours cannot exceed 8.0 hours.', 'error');
+      if (Number(row.billableHours) > 24) {
+        onShowToast('Validation Error', 'Billable hours cannot exceed 24.0 hours.', 'error');
         return;
       }
 
-      if (Number(row.nonBillableHours) > 8) {
-        onShowToast('Validation Error', 'Non-billable hours cannot exceed 8.0 hours.', 'error');
+      if (Number(row.nonBillableHours) > 24) {
+        onShowToast('Validation Error', 'Non-billable hours cannot exceed 24.0 hours.', 'error');
         return;
       }
 
-      if (Number(row.billableHours) + Number(row.nonBillableHours) > 8) {
-        onShowToast('Validation Error', 'Total hours cannot exceed 8.0 hours.', 'error');
+      const editTotal = Number(row.billableHours) + Number(row.nonBillableHours);
+      const minRequiredHours = leaveStatus?.has_leave ? leaveStatus.available_hours : 8.0;
+      if (editTotal < minRequiredHours) {
+        onShowToast('Validation Error', `Minimum ${minRequiredHours.toFixed(1)} hours (billable + non-billable) must be logged for this day.`, 'error');
+        return;
+      }
+      if (editTotal > 24.0) {
+        onShowToast('Validation Error', 'Total daily hours (billable + non-billable) cannot exceed 24.0 hours.', 'error');
         return;
       }
 
@@ -1009,7 +1016,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                           type="number"
                           step="0.5"
                           min="0"
-                          max="8"
+                          max="24"
                           placeholder="0.0"
                           value={row.billableHours === 0 ? '' : row.billableHours}
                           onChange={(e) => handleHoursChange(idx, 'billableHours', e.target.value)}
@@ -1076,7 +1083,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                           type="number"
                           step="0.5"
                           min="0"
-                          max="8"
+                          max="24"
                           placeholder="0.0"
                           value={row.nonBillableHours === 0 ? '' : row.nonBillableHours}
                           onChange={(e) => handleHoursChange(idx, 'nonBillableHours', e.target.value)}

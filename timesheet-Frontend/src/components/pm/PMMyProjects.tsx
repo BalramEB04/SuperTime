@@ -54,7 +54,7 @@ interface PMMyProjectsProps {
   timesheets: TimesheetEntry[];
   onAddProject: (project: Omit<Project, 'id'>) => void;
   onUpdateProject: (updatedProject: Project) => void;
-  onDeleteProject?: (projectId: string) => Promise<void> | void;
+  onDeleteProject?: (projectId: string, permanent?: boolean) => Promise<void> | void;
   onCreateClient: (name: string, contactInfo?: string) => Promise<any> | void;
   onAssignUserToProject: (projectId: string, userId: string) => void;
   onRemoveUserFromProject: (projectId: string, userId: string) => void;
@@ -178,9 +178,10 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
   const handleConfirmDelete = async () => {
     if (!deletingProject || !onDeleteProject) return;
     if (isDeletingProject) return;
+    const isAlreadyInactive = deletingProject.isActive === false || deletingProject.is_active === false;
     try {
       setIsDeletingProject(true);
-      await onDeleteProject(deletingProject.id);
+      await onDeleteProject(deletingProject.id, isAlreadyInactive);
       setDeletingProject(null);
       if (selectedProject?.id === deletingProject.id) {
         setSelectedProject(null);
@@ -1671,53 +1672,74 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
         </div>
       )}
 
-      {/* DELETE PROJECT CONFIRMATION MODAL */}
-      {deletingProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
-                <AlertCircle className="w-5 h-5 text-rose-600" />
+      {/* DELETE / DEACTIVATE PROJECT CONFIRMATION MODAL */}
+      {deletingProject && (() => {
+        const isAlreadyInactive = deletingProject.isActive === false || deletingProject.is_active === false;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
+            <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${isAlreadyInactive ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'}`}>
+                  <AlertCircle className={`w-5 h-5 ${isAlreadyInactive ? 'text-rose-600' : 'text-amber-600'}`} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    {isAlreadyInactive ? 'Permanently Delete Project' : 'Deactivate Project'}
+                  </h3>
+                  <p className={`text-xs ${isAlreadyInactive ? 'text-rose-500 font-semibold' : 'text-slate-500'}`}>
+                    {isAlreadyInactive
+                      ? 'This action cannot be undone and will permanently remove this project.'
+                      : 'This project will be made inactive and hidden from active operations.'}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Permanently Delete Project</h3>
-                <p className="text-xs text-rose-500 font-semibold">This action cannot be undone.</p>
-              </div>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Are you sure you want to permanently delete <span className="font-bold text-slate-900">{deletingProject.name}</span>? This will permanently remove the project, milestones, team assignments, documents, and associated timesheets.
-            </p>
-            <div className="pt-2 flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={isDeletingProject}
-                onClick={() => setDeletingProject(null)}
-                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs disabled:opacity-50 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isDeletingProject}
-                onClick={handleConfirmDelete}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
-              >
-                {isDeletingProject ? (
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {isAlreadyInactive ? (
                   <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Deleting...</span>
+                    Are you sure you want to permanently delete <span className="font-bold text-slate-900">{deletingProject.name}</span>? This will permanently remove the project, milestones, team assignments, documents, and associated timesheets from the database.
                   </>
                 ) : (
                   <>
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete Project</span>
+                    Are you sure you want to deactivate <span className="font-bold text-slate-900">{deletingProject.name}</span>? It will disappear from your active projects list. You can view or permanently delete it anytime under the <span className="font-semibold text-slate-800">Inactive Projects</span> filter.
                   </>
                 )}
-              </button>
+              </p>
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={isDeletingProject}
+                  onClick={() => setDeletingProject(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs disabled:opacity-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingProject}
+                  onClick={handleConfirmDelete}
+                  className={`px-4 py-2 rounded-xl text-white font-bold text-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 ${
+                    isAlreadyInactive
+                      ? 'bg-rose-600 hover:bg-rose-700'
+                      : 'bg-amber-600 hover:bg-amber-700'
+                  }`}
+                >
+                  {isDeletingProject ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>{isAlreadyInactive ? 'Deleting...' : 'Deactivating...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{isAlreadyInactive ? 'Permanently Delete' : 'Deactivate Project'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* EDIT PROJECT DETAILS MODAL */}
       {showEditModal && editFormData && (

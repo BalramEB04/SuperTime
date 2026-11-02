@@ -67,12 +67,14 @@ async def update_project(
 @router.delete("/{project_id}", response_model=dict, dependencies=[Depends(pm_only)])
 async def delete_project(
     project_id: int,
+    permanent: bool = Query(False, description="Whether to permanently hard delete the project"),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     service = ProjectService(db)
-    await service.delete_project(project_id, current_user=current_user)
-    return success_response(message="Project deleted successfully")
+    await service.delete_project(project_id, current_user=current_user, permanent=permanent)
+    msg = "Project permanently deleted successfully" if permanent else "Project deactivated successfully"
+    return success_response(message=msg)
 
 
 @router.post("/{project_id}/documents", response_model=dict, status_code=status.HTTP_201_CREATED, dependencies=[Depends(project_manage_roles)])

@@ -646,15 +646,19 @@ export default function App() {
   }, [currentUser, createProjectMutation, showToast]);
 
   const isDeletingProjectRef = React.useRef(false);
-  const handleDeleteProject = React.useCallback(async (projectId: string) => {
+  const handleDeleteProject = React.useCallback(async (projectId: string, permanent: boolean = false) => {
     if (isDeletingProjectRef.current) {
       showToast('Please wait', 'Project deletion is already in progress.', 'warning');
       return;
     }
     try {
       isDeletingProjectRef.current = true;
-      await deleteProjectMutation(projectId).unwrap();
-      showToast('Project Deleted', 'Project permanently deleted successfully', 'success');
+      await deleteProjectMutation({ projectId, permanent }).unwrap();
+      if (permanent) {
+        showToast('Project Deleted', 'Project permanently deleted from database', 'success');
+      } else {
+        showToast('Project Deactivated', 'Project deactivated and moved to Inactive Projects', 'success');
+      }
     } catch (e: any) {
       showToast('Action Failed', getErrorMessage(e, 'Failed to delete project'), 'error');
       throw e;
