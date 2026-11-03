@@ -26,11 +26,24 @@ _WEEKDAY_KEYS = [
 ]
 
 
+import time
+
+_CALENDAR_CACHE = None
+_CALENDAR_CACHE_TIME = 0.0
+_CALENDAR_CACHE_TTL = 60.0  # Cache for 60 seconds to avoid hundreds of sequential queries
+
 async def _get_working_calendar(db: AsyncSession) -> WorkingCalendar:
-    """Fetch the company's working calendar config, or return sensible defaults."""
+    """Fetch the company's working calendar config, or return sensible defaults (cached with 60s TTL)."""
+    global _CALENDAR_CACHE, _CALENDAR_CACHE_TIME
+    now = time.time()
+    if _CALENDAR_CACHE is not None and (now - _CALENDAR_CACHE_TIME) < _CALENDAR_CACHE_TTL:
+        return _CALENDAR_CACHE
+
     result = await db.execute(select(WorkingCalendar).limit(1))
     config = result.scalars().first()
     if config:
+        _CALENDAR_CACHE = config
+        _CALENDAR_CACHE_TIME = now
         return config
 
     # Fallback defaults if no config row exists
@@ -41,7 +54,16 @@ async def _get_working_calendar(db: AsyncSession) -> WorkingCalendar:
             "monday": True, "tuesday": True, "wednesday": True,
             "thursday": True, "friday": True, "saturday": False, "sunday": False,
         }
-    return _Defaults()
+    _CALENDAR_CACHE = _Defaults()
+    _CALENDAR_CACHE_TIME = now
+    return _CALENDAR_CACHE
+
+
+def invalidate_working_calendar_cache():
+    """Invalidate in-memory WorkingCalendar cache when updated by Admin."""
+    global _CALENDAR_CACHE, _CALENDAR_CACHE_TIME
+    _CALENDAR_CACHE = None
+    _CALENDAR_CACHE_TIME = 0.0
 
 
 async def _get_holidays_in_range(db: AsyncSession, start: date, end: date) -> set:

@@ -85,8 +85,9 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
   const today = new Date().toISOString().split('T')[0];
   const [showMarkLeaveModal, setShowMarkLeaveModal] = useState(false);
 
-  // Dynamic lock window from Admin Working Calendar configuration
+  // Dynamic lock window and holidays
   const { data: workingCalendarConfig } = useGetWorkingCalendarQuery();
+  const { data: holidaysList = [] } = useGetHolidaysQuery();
   const lockHours = workingCalendarConfig?.timesheetLockHours ?? 24;
   const maxPastDays = Math.max(1, Math.ceil(lockHours / 24));
   const minDateObj = new Date();
@@ -117,6 +118,45 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
     [projects, currentUser.id]
   );
   const displaySidebarProjects = assignedProjects;
+
+  useEffect(() => {
+    if (defaultDate && !editingEntry) {
+      setRows((prev) => prev.map((r, i) => (i === 0 ? { ...r, date: defaultDate } : r)));
+    }
+  }, [defaultDate, editingEntry]);
+
+  // Missing EODs calculation within active submission window
+  const missingEodDates = useMemo(() => {
+    if (!timesheets) return [];
+    const todayObj = new Date();
+    todayObj.setHours(0, 0, 0, 0);
+
+    const userSheets = timesheets.filter((t) => t.userId === currentUser.id);
+    const missing: string[] = [];
+    const cur = new Date(effectiveMinAllowedDate + 'T00:00:00');
+
+    while (cur < todayObj) {
+      const dateStr = cur.toISOString().split('T')[0];
+      const dayOfWeek = cur.getDay();
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+      if (!isWeekend) {
+        const isHoliday = (holidaysList || []).some((h) => h.date === dateStr);
+        if (!isHoliday) {
+          const dayEntries = userSheets.filter((t) => t.date === dateStr);
+          const totalHours = dayEntries.reduce(
+            (sum, t) => sum + (t.billableHours + t.nonBillableHours),
+            0
+          );
+          if (totalHours === 0) {
+            missing.push(dateStr);
+          }
+        }
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+    return missing;
+  }, [timesheets, currentUser.id, effectiveMinAllowedDate, holidaysList]);
 
   const [rows, setRows] = useState<FormRow[]>(() => {
     if (editingEntry) {
@@ -440,7 +480,6 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
   // Fetch leave status for the primary date (first row) — used to derive minimum hours
   const primaryDate = rows[0]?.date || today;
   const { data: leaveStatus, refetch: refetchLeave } = useGetLeaveForDateQuery(primaryDate);
-  const { data: holidaysList = [] } = useGetHolidaysQuery();
 
   const isWeekendSelected = rows.some((r) => {
     if (!r.date) return false;
@@ -458,7 +497,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
 
   const handleSubmit = async () => {
     if (isWeekendSelected) {
-      onShowToast('Weekend Work Required', 'Timesheet submission is not allowed on weekends. Please submit a Weekend Work Request under the Weekend Work tab.', 'error');
+      onShowToast('Weekend Date Selected', 'Timesheet submission is not allowed on weekends.', 'error');
       return;
     }
     if (matchedHoliday) {
@@ -712,7 +751,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
 
   return (
     <>
-      <div className={`w-full ${isSingleRow ? 'flex-1 min-h-0 flex flex-col' : 'min-h-full flex flex-col pb-4'} space-y-4 sm:space-y-5 text-slate-900 font-sans relative`}>
+      <div className={`w-full mb-5 ${isSingleRow ? 'flex-1 min-h-0 flex flex-col' : 'min-h-full flex flex-col pb-4'} space-y-4 sm:space-y-5 text-slate-900 font-sans relative`}>
         {/* Page Header (Compact, No Hero Banner) */}
         <div className="shrink-0 flex items-center justify-between gap-3 pb-1">
           <div className="space-y-0.5">
@@ -726,7 +765,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
             </p>
           </div>
 
-          {!editingEntry && (
+          {/* {!editingEntry && (
             <button
               type="button"
               onClick={() => setShowMarkLeaveModal(true)}
@@ -735,8 +774,43 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
               <CalendarX className="w-3.5 h-3.5 text-rose-500" />
               <span>Mark leave</span>
             </button>
-          )}
+          )} */}
         </div>
+
+        {/* Missing EOD Banner */}
+        {missingEodDates.length > 0 && !editingEntry && (
+          <div className="shrink-0 p-2.5 rounded-xl bg-amber-50/90 border border-amber-300 text-amber-900 flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <div className="text-xs">
+                <span className="font-extrabold text-amber-950">Missing EOD ({missingEodDates.length}): </span>
+                <span className="text-amber-800">You have unsubmitted timesheet(s) within the submission window. Click a date to fill:</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {missingEodDates.map((dateStr) => {
+                const isSelected = rows[0]?.date === dateStr;
+                return (
+                  <button
+                    key={dateStr}
+                    type="button"
+                    onClick={() => {
+                      setRows((prev) => prev.map((r, i) => i === 0 ? { ...r, date: dateStr } : r));
+                    }}
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs'
+                    }`}
+                    title={`Click to fill timesheet for ${dateStr}`}
+                  >
+                    {dateStr}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Leave Banner */}
         {leaveStatus?.has_leave && (
@@ -769,8 +843,8 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div className="text-xs">
               <span className="font-extrabold text-amber-900">Weekend Date Selected: </span>
-              <span className="text-amber-800">Direct timesheet submission is not permitted on weekends. Weekend work requires prior PM approval.</span>
-              {onNavigateTab && (
+              <span className="text-amber-800">Direct timesheet submission is not permitted on weekends.</span>
+              {/* Weekend Work Request flow commented out for now */ false && onNavigateTab && (
                 <button
                   type="button"
                   onClick={() => onNavigateTab('weekend_work')}

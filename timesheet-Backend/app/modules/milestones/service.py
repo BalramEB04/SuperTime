@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 from app.modules.milestones.repository import MilestoneRepository
 from app.modules.milestones.schema import MilestoneCreate, MilestoneUpdate, MilestoneResponse
 from app.modules.projects.repository import ProjectRepository
+from app.modules.projects.service import invalidate_project_cache
 from app.modules.users.model import User
 
 class MilestoneService:
@@ -37,6 +38,7 @@ class MilestoneService:
         await self._validate_weights(milestone_in.project_id, milestone_in.weight_percentage)
         
         milestone = await self.repository.create(milestone_in)
+        invalidate_project_cache()
         return MilestoneResponse.model_validate(milestone)
 
     async def update_milestone(self, milestone_id: int, milestone_in: MilestoneUpdate, current_user: User) -> MilestoneResponse:
@@ -50,6 +52,7 @@ class MilestoneService:
             await self._validate_weights(milestone.project_id, milestone_in.weight_percentage, exclude_milestone_id=milestone.id)
             
         updated = await self.repository.update(milestone, milestone_in)
+        invalidate_project_cache()
         return MilestoneResponse.model_validate(updated)
 
     async def get_milestones_by_project(self, project_id: int) -> List[MilestoneResponse]:
@@ -69,3 +72,4 @@ class MilestoneService:
             
         await self._check_pm_authorization(milestone.project_id, current_user)
         await self.repository.delete(milestone)
+        invalidate_project_cache()

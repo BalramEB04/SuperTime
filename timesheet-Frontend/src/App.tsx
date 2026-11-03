@@ -78,13 +78,13 @@ import { SubmitTimesheet } from './components/employee/SubmitTimesheet';
 import { TimesheetsHistory } from './components/employee/TimesheetsHistory';
 import { MyProjects } from './components/employee/MyProjects';
 import { LeaveManagement } from './components/employee/LeaveManagement';
-import { WeekendWork } from './components/employee/WeekendWork';
+// import { WeekendWork } from './components/employee/WeekendWork';
 
 import { PMDashboard } from './components/pm/PMDashboard';
 import { PMMyProjects } from './components/pm/PMMyProjects';
 import { PMResourceAllocation } from './components/pm/PMResourceAllocation';
 import { PMTimesheetReview } from './components/pm/PMTimesheetReview';
-import { PMWeekendWorkRequests } from './components/pm/PMWeekendWorkRequests';
+// import { PMWeekendWorkRequests } from './components/pm/PMWeekendWorkRequests';
 
 import { AccountManagerDashboard } from './components/ac_manager/AccountManagerDashboard';
 
@@ -230,13 +230,13 @@ export default function App() {
   // Local UI State — URL params take priority, then sessionStorage fallback, then default
   const _saved = _getSavedPage();
   const [activeEmployeeTab, setActiveEmployeeTab] = useState<EmployeeTab>(() => {
-    if (urlPortal === 'employee' && urlTab) return urlTab as EmployeeTab;
-    if (_saved.portal === 'employee' && _saved.tab) return _saved.tab as EmployeeTab;
+    if (urlPortal === 'employee' && urlTab && urlTab !== 'weekend_work') return urlTab as EmployeeTab;
+    if (_saved.portal === 'employee' && _saved.tab && _saved.tab !== 'weekend_work') return _saved.tab as EmployeeTab;
     return 'my_dashboard';
   });
   const [activePmTab, setActivePmTab] = useState<PMTab>(() => {
-    if (urlPortal === 'pm' && urlTab) return urlTab as PMTab;
-    if (_saved.portal === 'pm' && _saved.tab) return _saved.tab as PMTab;
+    if (urlPortal === 'pm' && urlTab && urlTab !== 'pm_weekend_work') return urlTab as PMTab;
+    if (_saved.portal === 'pm' && _saved.tab && _saved.tab !== 'pm_weekend_work') return _saved.tab as PMTab;
     return 'pm_dashboard';
   });
   const [activeAcTab, setActiveAcTab] = useState<ACManagerTab>(() => {
@@ -1022,6 +1022,10 @@ export default function App() {
                       setDefaultSubmitDate(null);
                     }
                   }}
+                  onNavigateToSubmit={(date) => {
+                    setDefaultSubmitDate(date);
+                    setActiveEmployeeTab('submit_timesheet');
+                  }}
                   onOpenMarkLeave={() => {
                     setOpenMarkLeaveModal(true);
                     setActiveEmployeeTab('submit_timesheet');
@@ -1064,7 +1068,7 @@ export default function App() {
                     setDefaultSubmitDate(date);
                     setActiveEmployeeTab('submit_timesheet');
                   }}
-                  onNavigateToWeekendWork={() => setActiveEmployeeTab('weekend_work')}
+                  // onNavigateToWeekendWork={() => setActiveEmployeeTab('weekend_work')}
                   onShowToast={showToast}
                 />
               )}
@@ -1089,6 +1093,7 @@ export default function App() {
                 />
               )}
 
+              {/* Weekend work request flow commented out for now
               {activeEmployeeTab === 'weekend_work' && (
                 <WeekendWork
                   currentUser={currentUser}
@@ -1098,7 +1103,7 @@ export default function App() {
                   onRequestWeekendWork={handleRequestWeekendWork}
                   onShowToast={showToast}
                 />
-              )}
+              )} */}
             </>
           )}
 
@@ -1187,7 +1192,7 @@ export default function App() {
                     setDefaultSubmitDate(date);
                     setActivePmTab('pm_submit_timesheet');
                   }}
-                  onNavigateToWeekendWork={() => setActivePmTab('pm_weekend_work')}
+                  // onNavigateToWeekendWork={() => setActivePmTab('pm_weekend_work')}
                   onShowToast={showToast}
                 />
               )}
@@ -1201,6 +1206,7 @@ export default function App() {
                 />
               )}
 
+              {/* Weekend work request flow commented out for now
               {activePmTab === 'pm_weekend_work' && (
                 <PMWeekendWorkRequests
                   currentUser={currentUser}
@@ -1211,7 +1217,7 @@ export default function App() {
                   onRejectWeekendWork={handleRejectWeekendWork}
                   onShowToast={showToast}
                 />
-              )}
+              )} */}
             </>
           )}
 

@@ -16,9 +16,9 @@ class Timesheet(Base):
     __tablename__ = "timesheets"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     project_assignment_id: Mapped[int] = mapped_column(
-        ForeignKey("project_assignments.id"), nullable=False
+        ForeignKey("project_assignments.id"), nullable=False, index=True
     )
     milestone_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("milestones.id", ondelete="SET NULL"), nullable=True, index=True

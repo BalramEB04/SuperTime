@@ -20,6 +20,7 @@ import {
   MoreHorizontal,
   BriefcaseBusiness,
   CircleUserRound,
+  AlertCircle,
 } from 'lucide-react';
 
 import {
@@ -32,7 +33,7 @@ import {
 } from '../../types';
 
 import { UpcomingLeavesWidget } from '../shared/UpcomingLeavesWidget';
-import { useGetUpcomingLeavesQuery } from '../../store/api/dataApi';
+import { useGetUpcomingLeavesQuery, useGetWorkingCalendarQuery } from '../../store/api/dataApi';
 import { EmployeeTab } from '../Sidebar';
 
 interface MyDashboardProps {
@@ -43,6 +44,7 @@ interface MyDashboardProps {
   leaveRequests: LeaveRequest[];
   holidays: HolidayItem[];
   onNavigateTab: (tab: EmployeeTab) => void;
+  onNavigateToSubmit?: (date: string) => void;
   onOpenMarkLeave?: () => void;
 }
 
@@ -99,6 +101,7 @@ export const MyDashboard: React.FC<MyDashboardProps> = React.memo(({
   leaveRequests = [],
   holidays = [],
   onNavigateTab,
+  onNavigateToSubmit,
   onOpenMarkLeave,
 }) => {
   const [showLeavesModal, setShowLeavesModal] = useState(false);
@@ -107,6 +110,80 @@ export const MyDashboard: React.FC<MyDashboardProps> = React.memo(({
     () => (timesheets || []).filter((t) => t.userId === currentUser.id),
     [timesheets, currentUser.id],
   );
+
+  // Working Calendar lock configuration
+  const { data: workingCalendarConfig } = useGetWorkingCalendarQuery();
+  const lockHours = workingCalendarConfig?.timesheetLockHours ?? 24;
+  const maxPastDays = Math.max(1, Math.ceil(lockHours / 24));
+  const minDateObj = new Date();
+  minDateObj.setDate(minDateObj.getDate() - maxPastDays);
+  const minAllowedDate = minDateObj.toISOString().split('T')[0];
+
+  const employeeJoinDate = currentUser.joinDate || (currentUser as any).joining_date || '';
+  const effectiveMinAllowedDate = employeeJoinDate && employeeJoinDate > minAllowedDate
+    ? employeeJoinDate
+    : minAllowedDate;
+
+  // Missing EODs calculation for this employee
+  const { missingEodDates, fillableMissingDates, isTodayLogged } = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0];
+
+    // Check past 30 days (or since employee joining date)
+    const startDate = new Date(today);
+    startDate.setDate(startDate.getDate() - 30);
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const effectiveStart = employeeJoinDate && employeeJoinDate > startDateStr ? employeeJoinDate : startDateStr;
+
+    const allMissing: string[] = [];
+    const fillableMissing: string[] = [];
+
+    const cur = new Date(effectiveStart + 'T00:00:00');
+    while (cur < today) {
+      const dateStr = cur.toISOString().split('T')[0];
+      const dayOfWeek = cur.getDay();
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+      if (!isWeekend) {
+        const isHoliday = (holidays || []).some((h) => h.date === dateStr);
+        const isOnLeave = (leaveRequests || []).some(
+          (lr) =>
+            lr.startDate <= dateStr &&
+            lr.endDate >= dateStr &&
+            (lr.status === 'approved' || lr.status === 'pending') &&
+            (!lr.leaveDurationType || lr.leaveDurationType === 'full_day')
+        );
+
+        if (!isHoliday && !isOnLeave) {
+          const dayEntries = userTimesheets.filter((t) => t.date === dateStr);
+          const totalHours = dayEntries.reduce(
+            (sum, t) => sum + (t.billableHours + t.nonBillableHours),
+            0
+          );
+          if (totalHours === 0) {
+            allMissing.push(dateStr);
+            if (dateStr >= effectiveMinAllowedDate) {
+              fillableMissing.push(dateStr);
+            }
+          }
+        }
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    const todayEntries = userTimesheets.filter((t) => t.date === todayStr);
+    const todayHours = todayEntries.reduce(
+      (sum, t) => sum + (t.billableHours + t.nonBillableHours),
+      0
+    );
+
+    return {
+      missingEodDates: allMissing,
+      fillableMissingDates: fillableMissing,
+      isTodayLogged: todayHours > 0,
+    };
+  }, [userTimesheets, holidays, leaveRequests, employeeJoinDate, effectiveMinAllowedDate]);
 
   const {
     currentWeekTimesheets,
@@ -330,6 +407,7 @@ export const MyDashboard: React.FC<MyDashboardProps> = React.memo(({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          {/* Weekend work request flow commented out for now
           <button
             type="button"
             onClick={() => onNavigateTab('weekend_work')}
@@ -338,6 +416,7 @@ export const MyDashboard: React.FC<MyDashboardProps> = React.memo(({
             <Moon className="h-4 w-4 text-slate-600" />
             <span>Weekend Request</span>
           </button>
+          */}
 
           <button
             type="button"
@@ -349,8 +428,8 @@ export const MyDashboard: React.FC<MyDashboardProps> = React.memo(({
           </button>
         </div>
       </div>
-      {/* 5-Card KPI row */}
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      {/* 4-Card KPI row (Weekend OT commented out for now) */}
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {/* Active Projects */}
         <div className="group rounded-[22px] border border-sky-200/70 bg-gradient-to-br from-white via-sky-50/50 to-blue-50/70 p-4.5 shadow-[0_8px_25px_rgba(14,165,233,0.08)] backdrop-blur-sm transition-all duration-300 hover:-translate-y-1 hover:border-sky-300 hover:shadow-[0_14px_35px_rgba(14,165,233,0.18)]">
           <div className="flex items-start justify-between">
@@ -406,7 +485,7 @@ export const MyDashboard: React.FC<MyDashboardProps> = React.memo(({
           </div>
         </div>
 
-        {/* Weekend OT */}
+        {/* Weekend OT - commented out for now
         <div className="group rounded-[22px] border border-amber-200/70 bg-gradient-to-br from-white via-amber-50/50 to-orange-50/70 p-4.5 shadow-[0_8px_25px_rgba(245,158,11,0.08)] backdrop-blur-sm transition-all duration-300 hover:-translate-y-1 hover:border-amber-300 hover:shadow-[0_14px_35px_rgba(245,158,11,0.18)]">
           <div className="flex items-start justify-between">
             <div className="rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 p-2.5 text-white shadow-md shadow-amber-500/25">
@@ -426,25 +505,37 @@ export const MyDashboard: React.FC<MyDashboardProps> = React.memo(({
             Pending requests
           </p>
         </div>
+        */}
 
-        {/* Team Leaves */}
-        <div className="group rounded-[22px] border border-rose-200/70 bg-gradient-to-br from-white via-rose-50/50 to-pink-50/70 p-4.5 shadow-[0_8px_25px_rgba(244,63,94,0.08)] backdrop-blur-sm transition-all duration-300 hover:-translate-y-1 hover:border-rose-300 hover:shadow-[0_14px_35px_rgba(244,63,94,0.18)]">
+        {/* Missing EOD */}
+        <div className="group rounded-[22px] border border-rose-200/70 bg-gradient-to-br from-white via-rose-50/50 to-red-50/70 p-4.5 shadow-[0_8px_25px_rgba(244,63,94,0.08)] backdrop-blur-sm transition-all duration-300 select-none">
           <div className="flex items-start justify-between">
-            <div className="rounded-2xl bg-gradient-to-br from-rose-500 to-pink-600 p-2.5 text-white shadow-md shadow-rose-500/25">
-              <Calendar className="h-5 w-5" />
+            <div className="rounded-2xl bg-gradient-to-br from-rose-500 to-red-600 p-2.5 text-white shadow-md shadow-rose-500/25">
+              <AlertCircle className="h-5 w-5" />
             </div>
-            <span className="rounded-full border border-rose-200/60 bg-gradient-to-r from-rose-500/15 to-pink-500/15 px-2.5 py-0.5 text-[10px] font-extrabold text-rose-700">
-              Scheduled
+            <span className="rounded-full border border-rose-200/60 bg-gradient-to-r from-rose-500/15 to-red-500/15 px-2.5 py-0.5 text-[10px] font-extrabold text-rose-700">
+              {missingEodDates.length > 0 ? 'Pending' : 'Status'}
             </span>
           </div>
           <p className="mt-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-            Team Leaves
+            Missing EOD
           </p>
-          <div className="mt-0.5 text-2xl font-black text-slate-950">
-            {upcomingLeaves.length}
+          <div className="mt-0.5 flex items-end gap-2">
+            <span className="text-2xl font-black text-slate-950">
+              {missingEodDates.length}
+            </span>
+            <span className="mb-0.5 text-[11px] font-bold text-rose-600">
+              {missingEodDates.length === 1 ? 'day' : 'days'}
+            </span>
           </div>
-          <p className="mt-1 text-[11px] text-slate-500">
-            Upcoming / active
+          <p className="mt-1 text-[11px] text-slate-500 truncate">
+            {missingEodDates.length > 0
+              ? fillableMissingDates.length > 0
+                ? `${fillableMissingDates.length} within active cutoff`
+                : `${missingEodDates.length} unsubmitted ${missingEodDates.length === 1 ? 'day' : 'days'}`
+              : !isTodayLogged
+              ? "Today's EOD pending"
+              : 'All timesheets logged'}
           </p>
         </div>
 

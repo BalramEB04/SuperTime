@@ -396,7 +396,7 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
                   onClick={() => {
                     if (dayEntries.length === 0) {
                       if (isWeekend) {
-                        onShowToast('Weekend Date', 'Weekend work requires prior PM approval. Please submit a request in the Weekend Work tab.', 'info');
+                        onShowToast('Weekend Date', 'Timesheet submission is not allowed on weekends.', 'info');
                         setSelectedDateModal(dateStr);
                         return;
                       }
@@ -746,9 +746,10 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
                       <div className="space-y-1">
                         <p className="font-extrabold text-sm text-amber-950">Weekend Date ({selectedDateModal})</p>
                         <p className="text-amber-800 text-xs max-w-xs mx-auto leading-relaxed">
-                          Timesheets cannot be submitted directly for weekends. Weekend work requires prior PM approval through a Weekend Work Request.
+                          Timesheets cannot be submitted directly for weekends.
                         </p>
                       </div>
+                      {/* Weekend Work Request flow commented out for now
                       {onNavigateToWeekendWork && (
                         <div className="pt-2">
                           <button
@@ -765,6 +766,7 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
                           </button>
                         </div>
                       )}
+                      */}
                     </div>
                   );
                 }

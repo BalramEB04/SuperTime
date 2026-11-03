@@ -9,6 +9,11 @@ engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
     future=True,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=300,        # Recycle connections every 5 min (prevents Neon serverless pooler timeouts)
+    pool_pre_ping=True,       # Detect disconnected connections before using them
+    pool_timeout=30,
 )
 
 AsyncSessionLocal = async_sessionmaker(
