@@ -11,6 +11,7 @@ from app.modules.project_assignments.schema import (
     ProjectAssignmentResponse,
 )
 from app.modules.projects.repository import ProjectRepository
+from app.modules.projects.service import invalidate_project_cache
 from app.modules.users.repository import UserRepository
 from app.modules.users.model import User
 
@@ -52,9 +53,11 @@ class ProjectAssignmentService:
             else:
                 # Reactivate the old assignment
                 assignment = await self.repository.reactivate(existing_assignment)
+                invalidate_project_cache()
                 return ProjectAssignmentResponse.model_validate(assignment)
 
         assignment = await self.repository.create(assignment_in)
+        invalidate_project_cache()
         return ProjectAssignmentResponse.model_validate(assignment)
 
     async def batch_assign_users_to_projects(
@@ -102,6 +105,7 @@ class ProjectAssignmentService:
                     assigned_count += 1
 
         await self.db.commit()
+        invalidate_project_cache()
 
         total = assigned_count + reactivated_count
         msg = f"Successfully assigned {len(batch_in.user_ids)} users across {len(batch_in.project_ids)} projects ({total} assignments processed)."
@@ -149,6 +153,7 @@ class ProjectAssignmentService:
                 )
         
         await self.repository.soft_delete(assignment)
+        invalidate_project_cache()
 
     async def remove_assignment_by_project_user(self, project_id: int, user_id: int, current_user: Optional[User] = None) -> None:
         if self._is_pm(current_user):
@@ -163,3 +168,4 @@ class ProjectAssignmentService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project assignment not found")
         
         await self.repository.soft_delete(assignment)
+        invalidate_project_cache()

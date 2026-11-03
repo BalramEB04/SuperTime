@@ -417,17 +417,11 @@ export const dataApi = apiSlice.injectEndpoints({
     }),
 
     createTimesheets: builder.mutation<void, TimesheetCreatePayload[]>({
-      queryFn: async (entries, _api, _extraOptions, baseQuery) => {
-        for (const entry of entries) {
-          const result = await baseQuery({
-            url: '/timesheets',
-            method: 'POST',
-            body: entry,
-          });
-          if (result.error) return { error: result.error };
-        }
-        return { data: undefined };
-      },
+      query: (entries) => ({
+        url: '/timesheets/batch',
+        method: 'POST',
+        body: entries,
+      }),
       invalidatesTags: ['Timesheet'],
     }),
 

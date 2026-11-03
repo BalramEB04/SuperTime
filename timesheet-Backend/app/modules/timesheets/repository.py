@@ -19,6 +19,28 @@ class TimesheetRepository:
         return await TimesheetRepository.get_by_id(db, timesheet.id)
 
     @staticmethod
+    async def create_batch(
+        db: AsyncSession, 
+        timesheets: List[Timesheet]
+    ) -> List[Timesheet]:
+        db.add_all(timesheets)
+        await db.commit()
+        for ts in timesheets:
+            await db.refresh(ts)
+        ids = [ts.id for ts in timesheets]
+        result = await db.execute(
+            select(Timesheet)
+            .options(
+                selectinload(Timesheet.user),
+                selectinload(Timesheet.project_assignment).selectinload(ProjectAssignment.project),
+                selectinload(Timesheet.milestone),
+            )
+            .filter(Timesheet.id.in_(ids))
+            .order_by(Timesheet.id.asc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
     async def get_by_id(db: AsyncSession, timesheet_id: int) -> Optional[Timesheet]:
         result = await db.execute(
             select(Timesheet)
@@ -37,6 +59,7 @@ class TimesheetRepository:
         user_id: int,
         timesheet_date: date,
         exclude_id: Optional[int] = None,
+        exclude_ids: Optional[List[int]] = None,
     ) -> float:
         query = select(
             func.coalesce(func.sum(Timesheet.billable_hours + Timesheet.non_billable_hours), 0.0)
@@ -46,6 +69,8 @@ class TimesheetRepository:
         )
         if exclude_id is not None:
             query = query.filter(Timesheet.id != exclude_id)
+        if exclude_ids:
+            query = query.filter(Timesheet.id.not_in(exclude_ids))
 
         res = await db.execute(query)
         return float(res.scalar_one())
@@ -140,10 +165,11 @@ class TimesheetRepository:
         return entries, total
 
     @staticmethod
-    async def get_by_user_project_date(
+    async def get_by_user_project_milestone_date(
         db: AsyncSession,
         user_id: int,
         project_assignment_id: int,
+        milestone_id: Optional[int],
         timesheet_date: date,
     ) -> Optional[Timesheet]:
         query = select(Timesheet).filter(
@@ -151,8 +177,24 @@ class TimesheetRepository:
             Timesheet.project_assignment_id == project_assignment_id,
             Timesheet.timesheet_date == timesheet_date,
         )
+        if milestone_id is not None:
+            query = query.filter(Timesheet.milestone_id == milestone_id)
+        else:
+            query = query.filter(Timesheet.milestone_id.is_(None))
         result = await db.execute(query)
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_by_user_project_date(
+        db: AsyncSession,
+        user_id: int,
+        project_assignment_id: int,
+        timesheet_date: date,
+        milestone_id: Optional[int] = None,
+    ) -> Optional[Timesheet]:
+        return await TimesheetRepository.get_by_user_project_milestone_date(
+            db, user_id, project_assignment_id, milestone_id, timesheet_date
+        )
 
     @staticmethod
     async def get_entries_in_range(
