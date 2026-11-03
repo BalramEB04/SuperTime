@@ -123,10 +123,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import os
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
-Path("uploads").mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+# Setup uploads directory safely (/tmp on serverless environments where root is read-only)
+uploads_dir = Path("/tmp/uploads" if (os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")) else "uploads")
+try:
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+except (OSError, PermissionError) as e:
+    logger.warning(f"Could not mount static uploads directory: {e}")
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
