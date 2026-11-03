@@ -100,6 +100,15 @@ const WorkingCalendar = React.lazy(() => import('./components/admin/WorkingCalen
 import { INITIAL_LEAVE_BALANCE, INITIAL_ACTIVITIES, INITIAL_LEAVE_TYPES, INITIAL_WORKING_CALENDAR, INITIAL_SETTINGS } from './data/initialData';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
+const isPortalAllowedForUser = (portal: ActivePortalMode, role: string | undefined): boolean => {
+  if (!role) return false;
+  const r = role.toLowerCase();
+  if (r.includes('admin')) return true;
+  if (r.includes('project') || r === 'pm') return portal === 'pm' || portal === 'employee';
+  if (r.includes('account') || r === 'ac_manager') return portal === 'ac_manager' || portal === 'employee';
+  return portal === 'employee';
+};
+
 const TAB_LABELS: Record<string, string> = {
   // Employee
   my_dashboard: 'My Dashboard',
@@ -250,10 +259,20 @@ export default function App() {
     return 'admin_overview';
   });
 
-  // Track previous tab per portal so we can distinguish a real tab change from a re-render
+  // Track previous tab and portal so we can distinguish real navigation from re-renders
   const prevTabRef = React.useRef<{ portal: string; tab: string } | null>(null);
-  // Track previous tab for "Go to previous tab" option across all portals
-  const [previousTabs, setPreviousTabs] = useState<Partial<Record<ActivePortalMode, { tab: string; label: string }>>>({});
+  // Track previous navigation for "Go Back" across all portals and tabs
+  const [previousNav, setPreviousNav] = useState<{ portal: ActivePortalMode; tab: string; label: string } | null>(null);
+
+  // Clear navigation history when user logs in, logs out, or switches accounts
+  const currentUserIdRef = React.useRef<string | number | null>(currentUser?.id ?? null);
+  React.useEffect(() => {
+    if (currentUser?.id !== currentUserIdRef.current) {
+      currentUserIdRef.current = currentUser?.id ?? null;
+      setPreviousNav(null);
+      prevTabRef.current = null;
+    }
+  }, [currentUser?.id]);
 
   // Sync state changes to URL and sessionStorage (for browser-close/reopen restoration)
   React.useEffect(() => {
@@ -262,6 +281,7 @@ export default function App() {
       window.history.replaceState(null, '', window.location.pathname);
       try { sessionStorage.removeItem('ST_lastPage'); } catch { /* ignore */ }
       prevTabRef.current = null;
+      setPreviousNav(null);
       return;
     }
 
@@ -279,20 +299,15 @@ export default function App() {
     if (prev === null) {
       // First render after login — just set the URL, don't push history
       window.history.replaceState({ portal: portalMode, tab: activeTab }, '', newUrl);
-    } else if (prev.portal !== portalMode) {
-      // Portal mode switched (e.g. employee → pm) — replace, not push (not a page navigation)
-      window.history.replaceState({ portal: portalMode, tab: activeTab }, '', newUrl);
-    } else if (prev.tab !== activeTab) {
-      // Tab changed within the same portal — push a real history entry so Back/Forward works
+    } else if (prev.portal !== portalMode || prev.tab !== activeTab) {
+      // Portal mode or Tab changed — push a real history entry and track previous navigation
       window.history.pushState({ portal: portalMode, tab: activeTab }, '', newUrl);
       if (prev.tab) {
-        setPreviousTabs((curr) => ({
-          ...curr,
-          [portalMode]: {
-            tab: prev.tab,
-            label: TAB_LABELS[prev.tab] || prev.tab,
-          },
-        }));
+        setPreviousNav({
+          portal: prev.portal as ActivePortalMode,
+          tab: prev.tab,
+          label: TAB_LABELS[prev.tab] || prev.tab,
+        });
       }
     } else {
       // Same portal + same tab (initial mount or re-render) — just replace silently
@@ -348,6 +363,8 @@ export default function App() {
         if (event.data === 'logout' && !isLoggingOut) {
           // Another tab logged out — mirror the logout here without calling the server again
           setIsLoggingOut(true);
+          setPreviousNav(null);
+          prevTabRef.current = null;
           dispatch(logout());
           dispatch(apiSlice.util.resetApiState());
         }
@@ -484,6 +501,8 @@ export default function App() {
   const handleLogout = React.useCallback(() => {
     // 1. Prevent getCurrentUser from re-firing during this render cycle.
     setIsLoggingOut(true);
+    setPreviousNav(null);
+    prevTabRef.current = null;
 
     // 2. Clear user — component re-renders to <LoginPage /> immediately.
     dispatch(logout());
@@ -869,18 +888,25 @@ export default function App() {
 
   // Memoized Sidebar & Header callbacks
   const handleGoToPreviousTab = React.useCallback(() => {
-    const prev = previousTabs[portalMode];
-    if (!prev) return;
-    if (portalMode === 'employee') {
-      setActiveEmployeeTab(prev.tab as EmployeeTab);
-    } else if (portalMode === 'pm') {
-      setActivePmTab(prev.tab as PMTab);
-    } else if (portalMode === 'ac_manager') {
-      setActiveAcTab(prev.tab as ACManagerTab);
-    } else if (portalMode === 'admin') {
-      setActiveAdminTab(prev.tab as AdminTab);
+    if (!previousNav) return;
+    // Security check: verify user role is authorized for the target portal
+    if (!isPortalAllowedForUser(previousNav.portal, currentUser?.role)) {
+      setPreviousNav(null);
+      return;
     }
-  }, [portalMode, previousTabs]);
+    if (previousNav.portal !== portalMode) {
+      dispatch(setPortalMode(previousNav.portal));
+    }
+    if (previousNav.portal === 'employee') {
+      setActiveEmployeeTab(previousNav.tab as EmployeeTab);
+    } else if (previousNav.portal === 'pm') {
+      setActivePmTab(previousNav.tab as PMTab);
+    } else if (previousNav.portal === 'ac_manager') {
+      setActiveAcTab(previousNav.tab as ACManagerTab);
+    } else if (previousNav.portal === 'admin') {
+      setActiveAdminTab(previousNav.tab as AdminTab);
+    }
+  }, [previousNav, portalMode, currentUser, dispatch]);
 
   const handleTogglePortalMode = React.useCallback((mode: ActivePortalMode) => {
     dispatch(setPortalMode(mode));
@@ -975,9 +1001,9 @@ export default function App() {
         onLogout={handleLogout}
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebar={handleToggleSidebar}
-        previousTab={previousTabs[portalMode] ? {
-          tab: previousTabs[portalMode]!.tab,
-          label: previousTabs[portalMode]!.label,
+        previousTab={previousNav && isPortalAllowedForUser(previousNav.portal, currentUser?.role) ? {
+          tab: previousNav.tab,
+          label: previousNav.label,
           onGoBack: handleGoToPreviousTab,
         } : null}
       />
