@@ -4,19 +4,28 @@ import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, path.resolve(__dirname, '..'), '');
+  const rootDir = path.resolve(__dirname, '..');
+  const frontendDir = __dirname;
+
+  // Load env from both root (monorepo) and frontend directory, plus process.env
+  const rootEnv = loadEnv(mode, rootDir, '');
+  const frontendEnv = loadEnv(mode, frontendDir, '');
+  const env = { ...rootEnv, ...frontendEnv, ...process.env };
+
   const googleClientId =
     env.VITE_GOOGLE_CLIENT_ID ||
     env.GOOGLE_CLIENT_ID ||
-    process.env.VITE_GOOGLE_CLIENT_ID ||
-    process.env.GOOGLE_CLIENT_ID ||
     '';
 
+  const apiBaseUrl =
+    env.VITE_API_BASE_URL ||
+    (mode === 'development' ? 'http://127.0.0.1:8000/api/v1' : '');
+
   return {
-    envDir: path.resolve(__dirname, '..'),
     plugins: [react(), tailwindcss()],
     define: {
       'import.meta.env.VITE_GOOGLE_CLIENT_ID': JSON.stringify(googleClientId),
+      'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiBaseUrl),
     },
     resolve: {
       alias: {

@@ -136,7 +136,7 @@ class Settings(BaseSettings):
     NEON_STORAGE_BUCKET: str = "assets"
 
     model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"),
+        env_file=("../.env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
