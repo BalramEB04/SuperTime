@@ -68,6 +68,8 @@ class Settings(BaseSettings):
 
     # CORS
     FRONTEND_URLS: List[str] = [
+        "https://super-time-frontend.vercel.app",
+
         "https://super-time.vercel.app",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -82,7 +84,9 @@ class Settings(BaseSettings):
     def assemble_frontend_urls(cls, v: Any) -> List[str]:
         if not v:
             return [
-                "https://super-time.vercel.app",
+                "https://super-time-frontend.vercel.app",
+
+        "https://super-time.vercel.app",
                 "http://localhost:3000",
                 "http://localhost:5173",
                 "http://localhost",
@@ -105,6 +109,8 @@ class Settings(BaseSettings):
         cleaned = [str(u).rstrip("/") for u in urls if u]
         if "https://super-time.vercel.app" not in cleaned:
             cleaned.append("https://super-time.vercel.app")
+        if "https://super-time-frontend.vercel.app" not in cleaned:
+            cleaned.append("https://super-time-frontend.vercel.app")
         return cleaned
 
     # SMTP Email Settings
