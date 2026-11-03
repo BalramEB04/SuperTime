@@ -136,24 +136,13 @@ class UserService:
 
         # Validate status if updating
         if "status" in update_dict:
-            validated_st = UserValidator.validate_status(update_dict["status"])
-            if validated_st == "Inactive" and (user.role_id == 1 or (user.role and user.role.name == "Admin")):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Admin accounts cannot be deactivated.",
-                )
-            update_dict["status"] = validated_st
+            update_dict["status"] = UserValidator.validate_status(update_dict["status"])
 
         return await UserRepository.update(db, user, update_dict)
 
     @staticmethod
     async def toggle_user_status(db: AsyncSession, user_id: int, new_status: str) -> User:
         user = await UserService.get_user_by_id(db, user_id)
-        if user.role_id == 1 or (user.role and user.role.name == "Admin"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Admin accounts cannot be deactivated.",
-            )
         validated_status = UserValidator.validate_status(new_status)
         return await UserRepository.toggle_status(db, user, validated_status)
 
