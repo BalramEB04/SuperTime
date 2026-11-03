@@ -100,6 +100,42 @@ const WorkingCalendar = React.lazy(() => import('./components/admin/WorkingCalen
 import { INITIAL_LEAVE_BALANCE, INITIAL_ACTIVITIES, INITIAL_LEAVE_TYPES, INITIAL_WORKING_CALENDAR, INITIAL_SETTINGS } from './data/initialData';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
+const TAB_LABELS: Record<string, string> = {
+  // Employee
+  my_dashboard: 'My Dashboard',
+  submit_timesheet: 'Submit Timesheet',
+  timesheets_history: 'Timesheets History',
+  my_projects: 'Assigned Projects',
+  leave_management: 'Leave Management',
+  weekend_work: 'Weekend Work',
+
+  // PM
+  pm_dashboard: 'PM Dashboard',
+  pm_my_projects: 'My Projects',
+  pm_resource_allocation: 'Resource Allocation',
+  pm_submit_timesheet: 'Submit Timesheet',
+  pm_timesheets_history: 'Timesheet History',
+  pm_timesheet_review: 'Timesheet Review',
+  pm_weekend_work: 'Weekend Work',
+
+  // AC Manager
+  ac_dashboard: 'Portfolio Dashboard',
+  project_financials: 'Project Financials',
+  employee_utilization: 'Resource Utilization',
+  budget_vs_actual: 'Budget vs Actual',
+  tool_utilization: 'Tool Utilization',
+  ac_reports: 'Financial Reports',
+
+  // Admin
+  admin_overview: 'Admin Dashboard',
+  user_management: 'User Management',
+  admin_tools: 'Tool Management',
+  admin_holidays: 'Holidays',
+  admin_leave_types: 'Leave Types',
+  admin_working_calendar: 'Working Calendar',
+  admin_leave_approvals: 'Leave Approvals',
+};
+
 export default function App() {
   const dispatch = useDispatch();
   const { user: currentUser, portalMode } = useSelector((state: RootState) => state.auth);
@@ -216,6 +252,8 @@ export default function App() {
 
   // Track previous tab per portal so we can distinguish a real tab change from a re-render
   const prevTabRef = React.useRef<{ portal: string; tab: string } | null>(null);
+  // Track previous tab for "Go to previous tab" option across all portals
+  const [previousTabs, setPreviousTabs] = useState<Partial<Record<ActivePortalMode, { tab: string; label: string }>>>({});
 
   // Sync state changes to URL and sessionStorage (for browser-close/reopen restoration)
   React.useEffect(() => {
@@ -247,6 +285,15 @@ export default function App() {
     } else if (prev.tab !== activeTab) {
       // Tab changed within the same portal — push a real history entry so Back/Forward works
       window.history.pushState({ portal: portalMode, tab: activeTab }, '', newUrl);
+      if (prev.tab) {
+        setPreviousTabs((curr) => ({
+          ...curr,
+          [portalMode]: {
+            tab: prev.tab,
+            label: TAB_LABELS[prev.tab] || prev.tab,
+          },
+        }));
+      }
     } else {
       // Same portal + same tab (initial mount or re-render) — just replace silently
       window.history.replaceState({ portal: portalMode, tab: activeTab }, '', newUrl);
@@ -821,6 +868,20 @@ export default function App() {
   }, [deleteLeaveType, showToast]);
 
   // Memoized Sidebar & Header callbacks
+  const handleGoToPreviousTab = React.useCallback(() => {
+    const prev = previousTabs[portalMode];
+    if (!prev) return;
+    if (portalMode === 'employee') {
+      setActiveEmployeeTab(prev.tab as EmployeeTab);
+    } else if (portalMode === 'pm') {
+      setActivePmTab(prev.tab as PMTab);
+    } else if (portalMode === 'ac_manager') {
+      setActiveAcTab(prev.tab as ACManagerTab);
+    } else if (portalMode === 'admin') {
+      setActiveAdminTab(prev.tab as AdminTab);
+    }
+  }, [portalMode, previousTabs]);
+
   const handleTogglePortalMode = React.useCallback((mode: ActivePortalMode) => {
     dispatch(setPortalMode(mode));
   }, [dispatch]);
@@ -914,6 +975,11 @@ export default function App() {
         onLogout={handleLogout}
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebar={handleToggleSidebar}
+        previousTab={previousTabs[portalMode] ? {
+          tab: previousTabs[portalMode]!.tab,
+          label: previousTabs[portalMode]!.label,
+          onGoBack: handleGoToPreviousTab,
+        } : null}
       />
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
