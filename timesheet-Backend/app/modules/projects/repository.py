@@ -1,12 +1,11 @@
 from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 from app.modules.projects.model import Project, ProjectDocument
 from app.modules.projects.schema import ProjectCreate, ProjectUpdate
 
-from app.modules.project_assignments.model import ProjectAssignment
 from app.modules.tool_allocations.model import ToolAllocation
 from app.modules.milestones.model import Milestone
 
@@ -18,9 +17,9 @@ class ProjectRepository:
         result = await self.db.execute(
             select(Project)
             .options(
-                selectinload(Project.client), 
-                selectinload(Project.project_manager),
-                selectinload(Project.assignments).selectinload(ProjectAssignment.user),
+                joinedload(Project.client), 
+                joinedload(Project.project_manager),
+                selectinload(Project.assignments),
                 selectinload(Project.milestones).selectinload(Milestone.tool_allocations).selectinload(ToolAllocation.tool),
                 selectinload(Project.documents)
             )
@@ -38,9 +37,9 @@ class ProjectRepository:
         query = (
             select(Project)
             .options(
-                selectinload(Project.client), 
-                selectinload(Project.project_manager),
-                selectinload(Project.assignments).selectinload(ProjectAssignment.user),
+                joinedload(Project.client), 
+                joinedload(Project.project_manager),
+                selectinload(Project.assignments),
                 selectinload(Project.milestones).selectinload(Milestone.tool_allocations).selectinload(ToolAllocation.tool),
                 selectinload(Project.documents)
             )
@@ -50,7 +49,7 @@ class ProjectRepository:
         if project_manager_id is not None:
             query = query.where(Project.project_manager_id == project_manager_id)
         result = await self.db.execute(query.offset(skip).limit(limit))
-        return list(result.scalars().all())
+        return list(result.scalars().unique().all())
 
     async def create(self, project_in: ProjectCreate) -> Project:
         project = Project(**project_in.model_dump())
@@ -72,6 +71,10 @@ class ProjectRepository:
         await self.db.commit()
         await self.db.refresh(project)
         return project
+
+    async def delete(self, project: Project) -> None:
+        await self.db.delete(project)
+        await self.db.commit()
 
     async def add_document(self, document: ProjectDocument) -> ProjectDocument:
         self.db.add(document)

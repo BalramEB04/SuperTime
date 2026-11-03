@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 import math
-from typing import Optional
+from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -18,6 +18,14 @@ class TimesheetValidator:
     def validate_not_future_date(timesheet_date: date) -> None:
         if timesheet_date > date.today():
             raise BadRequestException(detail="Cannot log timesheets for future dates.")
+
+    @staticmethod
+    def validate_not_before_joining_date(joining_date: Optional[date], timesheet_date: date) -> None:
+        if joining_date and timesheet_date < joining_date:
+            raise BadRequestException(
+                detail=f"Cannot submit timesheet for {timesheet_date}. "
+                       f"Submissions are only permitted on or after your joining date ({joining_date})."
+            )
 
     @staticmethod
     async def validate_submission_window(db: AsyncSession, timesheet_date: date) -> None:
@@ -51,6 +59,22 @@ class TimesheetValidator:
         milestone = result.scalar_one_or_none()
         if not milestone or milestone.project_id != project_id:
             raise BadRequestException(detail="Selected milestone does not belong to this project.")
+
+    @staticmethod
+    def validate_no_duplicate_milestones(timesheets: list) -> None:
+        """
+        Ensures that within a batch submission, no two rows share the same
+        (project_assignment_id, milestone_id, timesheet_date).
+        """
+        seen = set()
+        for ts in timesheets:
+            key = (ts.project_assignment_id, ts.milestone_id, ts.timesheet_date)
+            if key in seen:
+                milestone_desc = f"milestone ID {ts.milestone_id}" if ts.milestone_id else "the same project"
+                raise BadRequestException(
+                    detail=f"Duplicate entry detected: You cannot submit multiple timesheet rows for {milestone_desc} on {ts.timesheet_date}."
+                )
+            seen.add(key)
 
     @staticmethod
     def validate_not_weekend(timesheet_date: date) -> None:
@@ -103,14 +127,15 @@ class TimesheetValidator:
         timesheet_date: date,
         new_hours: float,
         exclude_id: Optional[int] = None,
+        exclude_ids: Optional[List[int]] = None,
     ) -> None:
         if new_hours <= 0:
             raise BadRequestException(detail="Logged hours must be greater than 0.")
         if new_hours > 24.0:
-            raise BadRequestException(detail="Single entry cannot exceed 24.0 hours.")
+            raise BadRequestException(detail="Single entry or batch cannot exceed 24.0 hours.")
 
         existing_total = await TimesheetRepository.get_daily_total_hours(
-            db, user_id, timesheet_date, exclude_id=exclude_id
+            db, user_id, timesheet_date, exclude_id=exclude_id, exclude_ids=exclude_ids
         )
 
         total_after_add = existing_total + new_hours
@@ -171,4 +196,3 @@ class TimesheetValidator:
                            f"on {timesheet_date}. Maximum allowed hours: {max_hours:.1f}h. "
                            f"You have already logged {existing_total}h and are trying to add {new_hours}h."
                 )
-

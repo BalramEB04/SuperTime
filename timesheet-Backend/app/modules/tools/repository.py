@@ -13,22 +13,23 @@ class ToolRepository:
     async def get_by_id(self, tool_id: int) -> Optional[Tool]:
         result = await self.db.execute(
             select(Tool)
-            .where(Tool.id == tool_id, Tool.status == "Active")
+            .where(Tool.id == tool_id)
         )
         return result.scalars().first()
 
     async def get_by_name(self, name: str) -> Optional[Tool]:
         result = await self.db.execute(
             select(Tool)
-            .where(Tool.name == name, Tool.status == "Active")
+            .where(Tool.name == name)
         )
         return result.scalars().first()
 
-    async def get_all(self, skip: int = 0, limit: int = 100) -> List[Tool]:
+    async def get_all(self, skip: int = 0, limit: int = 100, active_only: bool = False) -> List[Tool]:
+        query = select(Tool)
+        if active_only:
+            query = query.where(Tool.status == "Active")
         result = await self.db.execute(
-            select(Tool)
-            .where(Tool.status == "Active")
-            .offset(skip).limit(limit)
+            query.order_by(Tool.id.asc()).offset(skip).limit(limit)
         )
         return list(result.scalars().all())
 

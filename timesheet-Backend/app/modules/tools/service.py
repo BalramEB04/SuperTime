@@ -25,8 +25,8 @@ class ToolService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool not found")
         return ToolResponse.model_validate(tool)
 
-    async def get_all_tools(self, skip: int = 0, limit: int = 100) -> List[ToolResponse]:
-        tools = await self.repository.get_all(skip=skip, limit=limit)
+    async def get_all_tools(self, skip: int = 0, limit: int = 100, active_only: bool = False) -> List[ToolResponse]:
+        tools = await self.repository.get_all(skip=skip, limit=limit, active_only=active_only)
         return [ToolResponse.model_validate(t) for t in tools]
 
     async def update_tool(self, tool_id: int, tool_in: ToolUpdate) -> ToolResponse:

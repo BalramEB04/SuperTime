@@ -1,11 +1,14 @@
 from datetime import date, timedelta
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.modules.timesheets.model import Timesheet
 from app.modules.users.model import User
 from app.modules.timesheets.repository import TimesheetRepository
+from app.modules.project_assignments.model import ProjectAssignment
 from app.modules.timesheets.schema import (
     DailyTimesheetBreakdown,
     TimesheetCreate,
@@ -25,7 +28,8 @@ class TimesheetService:
         current_user: User,
         timesheet_in: TimesheetCreate,
     ) -> Timesheet:
-        # 1. Validate date submission window (enforcing admin lock hours), not a weekend, and not a holiday
+        # 1. Validate date submission window (enforcing admin lock hours), joining date, not a weekend, and not a holiday
+        TimesheetValidator.validate_not_before_joining_date(current_user.joining_date, timesheet_in.timesheet_date)
         await TimesheetValidator.validate_submission_window(db, timesheet_in.timesheet_date)
         TimesheetValidator.validate_not_weekend(timesheet_in.timesheet_date)
         await TimesheetValidator.validate_not_holiday(db, timesheet_in.timesheet_date)
@@ -39,11 +43,12 @@ class TimesheetService:
                 db, assignment.project_id, timesheet_in.milestone_id
             )
 
-        existing = await TimesheetRepository.get_by_user_project_date(
-            db, current_user.id, timesheet_in.project_assignment_id, timesheet_in.timesheet_date
+        # 3. Check for exact milestone match on this date
+        existing = await TimesheetRepository.get_by_user_project_milestone_date(
+            db, current_user.id, timesheet_in.project_assignment_id, timesheet_in.milestone_id, timesheet_in.timesheet_date
         )
 
-        # 3. Validate max 24h/day limit (excluding existing if upsert)
+        # 4. Validate max 24h/day limit (excluding existing if upsert)
         target_total_hours = timesheet_in.billable_hours + timesheet_in.non_billable_hours
         await TimesheetValidator.validate_daily_hours(
             db, 
@@ -53,7 +58,7 @@ class TimesheetService:
             exclude_id=existing.id if existing else None
         )
 
-        # 4. Validate no leave conflict for this date
+        # 5. Validate no leave conflict for this date
         await TimesheetValidator.validate_no_leave_conflict(
             db,
             current_user.id,
@@ -62,7 +67,7 @@ class TimesheetService:
         )
 
         if existing:
-            # Upsert: Update completely the existing row
+            # Upsert: Update the matching project + milestone row
             update_data = {
                 "billable_hours": timesheet_in.billable_hours,
                 "billable_work_summary": timesheet_in.billable_work_summary,
@@ -72,7 +77,7 @@ class TimesheetService:
             }
             return await TimesheetRepository.update(db, existing, update_data)
 
-        # 5. Create timesheet entry
+        # 6. Create timesheet entry
         timesheet = Timesheet(
             user_id=current_user.id,
             project_assignment_id=timesheet_in.project_assignment_id,
@@ -85,6 +90,117 @@ class TimesheetService:
         )
         return await TimesheetRepository.create(db, timesheet)
 
+    @staticmethod
+    async def create_timesheets_batch(
+        db: AsyncSession,
+        current_user: User,
+        timesheets_in: List[TimesheetCreate],
+    ) -> List[Timesheet]:
+        """
+        Atomically validates and creates/updates a batch of timesheet entries.
+        Guarantees that multiple milestones under the same project can be logged simultaneously,
+        while strictly preventing duplicate (project, milestone) entries.
+        """
+        if not timesheets_in:
+            return []
+
+        # 1. Validate no duplicate project_assignment + milestone on the same date within the batch
+        TimesheetValidator.validate_no_duplicate_milestones(timesheets_in)
+
+        # 2. Validate basic rules for each entry
+        assignments_cache = {}
+        for item in timesheets_in:
+            TimesheetValidator.validate_not_before_joining_date(current_user.joining_date, item.timesheet_date)
+            await TimesheetValidator.validate_submission_window(db, item.timesheet_date)
+            TimesheetValidator.validate_not_weekend(item.timesheet_date)
+            await TimesheetValidator.validate_not_holiday(db, item.timesheet_date)
+
+            if item.project_assignment_id not in assignments_cache:
+                assignment = await TimesheetValidator.validate_project_assignment(
+                    db, current_user.id, item.project_assignment_id
+                )
+                assignments_cache[item.project_assignment_id] = assignment
+            else:
+                assignment = assignments_cache[item.project_assignment_id]
+
+            if item.milestone_id and assignment:
+                await TimesheetValidator.validate_milestone(
+                    db, assignment.project_id, item.milestone_id
+                )
+
+        # 3. Group by date and validate daily hours & leave conflicts
+        entries_by_date = {}
+        for item in timesheets_in:
+            entries_by_date.setdefault(item.timesheet_date, []).append(item)
+
+        upsert_map = {}
+        for target_date, day_items in entries_by_date.items():
+            existing_ids_for_date = []
+            for item in day_items:
+                existing = await TimesheetRepository.get_by_user_project_milestone_date(
+                    db, current_user.id, item.project_assignment_id, item.milestone_id, item.timesheet_date
+                )
+                if existing:
+                    existing_ids_for_date.append(existing.id)
+                    upsert_map[(item.project_assignment_id, item.milestone_id, item.timesheet_date)] = existing
+
+            day_total_hours = sum(item.billable_hours + item.non_billable_hours for item in day_items)
+
+            await TimesheetValidator.validate_daily_hours(
+                db,
+                current_user.id,
+                target_date,
+                day_total_hours,
+                exclude_ids=existing_ids_for_date,
+            )
+
+            await TimesheetValidator.validate_no_leave_conflict(
+                db,
+                current_user.id,
+                target_date,
+                day_total_hours,
+            )
+
+        # 4. Atomically apply upserts and inserts
+        saved_instances = []
+        for item in timesheets_in:
+            key = (item.project_assignment_id, item.milestone_id, item.timesheet_date)
+            existing = upsert_map.get(key)
+            if existing:
+                existing.billable_hours = item.billable_hours
+                existing.billable_work_summary = item.billable_work_summary
+                existing.non_billable_hours = item.non_billable_hours
+                existing.non_billable_work_summary = item.non_billable_work_summary
+                saved_instances.append(existing)
+            else:
+                new_ts = Timesheet(
+                    user_id=current_user.id,
+                    project_assignment_id=item.project_assignment_id,
+                    milestone_id=item.milestone_id,
+                    timesheet_date=item.timesheet_date,
+                    billable_hours=item.billable_hours,
+                    billable_work_summary=item.billable_work_summary,
+                    non_billable_hours=item.non_billable_hours,
+                    non_billable_work_summary=item.non_billable_work_summary,
+                )
+                db.add(new_ts)
+                saved_instances.append(new_ts)
+
+        await db.commit()
+
+        # Reload with relationships
+        ids = [s.id for s in saved_instances]
+        res = await db.execute(
+            select(Timesheet)
+            .options(
+                selectinload(Timesheet.user),
+                selectinload(Timesheet.project_assignment).selectinload(ProjectAssignment.project),
+                selectinload(Timesheet.milestone),
+            )
+            .filter(Timesheet.id.in_(ids))
+            .order_by(Timesheet.id.asc())
+        )
+        return list(res.scalars().all())
 
     @staticmethod
     async def get_my_timesheets(
@@ -165,6 +281,7 @@ class TimesheetService:
         target_assignment = update_data.get("project_assignment_id", entry.project_assignment_id)
 
         if "timesheet_date" in update_data:
+            TimesheetValidator.validate_not_before_joining_date(current_user.joining_date, target_date)
             await TimesheetValidator.validate_submission_window(db, target_date)
             TimesheetValidator.validate_not_weekend(target_date)
             await TimesheetValidator.validate_not_holiday(db, target_date)

@@ -138,3 +138,20 @@ async def toggle_user_status(
         data=user_response,
         message=f"User status updated to '{updated_user.status}' successfully",
     )
+
+
+@router.delete("/{user_id}", summary="Delete user permanently (Admin only)")
+async def delete_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    """
+    Permanently deletes a user from the system.
+    Only accessible by Admin.
+    """
+    await UserService.delete_user(db, user_id, admin_user.id)
+    return success_response(
+        data=None,
+        message="User deleted successfully",
+    )

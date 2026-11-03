@@ -4,7 +4,9 @@ import { RootState } from './index';
 import { logout } from './slices/authSlice';
 import { mapBackendUserToFrontendUser } from '../utils/api';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV);
 if (!API_BASE_URL) {
   throw new Error(
     '[apiSlice] VITE_API_BASE_URL is not set. ' +

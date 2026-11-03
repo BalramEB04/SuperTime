@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Optional
+from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,27 @@ async def create_timesheet(
     return created_response(
         data=resp.model_dump(mode="json"),
         message="Timesheet entry created successfully",
+    )
+
+
+@router.post("/batch", response_model=dict, status_code=status.HTTP_201_CREATED, summary="Create/update timesheets in batch")
+async def create_timesheets_batch(
+    timesheets_in: List[TimesheetCreate],
+    current_user: User = Depends(require_roles("Employee", "Project_Manager", "Admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    entries = await TimesheetService.create_timesheets_batch(db, current_user, timesheets_in)
+    items = []
+    for e in entries:
+        dump = TimesheetResponse.model_validate(e).model_dump(mode="json")
+        dump["user_name"] = e.user_name
+        dump["user_avatar"] = e.user_avatar
+        dump["project_name"] = e.project_name
+        dump["milestone_name"] = e.milestone_name
+        items.append(dump)
+    return created_response(
+        data=items,
+        message=f"{len(items)} timesheet entries created successfully",
     )
 
 
@@ -143,7 +164,6 @@ async def update_timesheet(
         data=resp.model_dump(mode="json"),
         message="Timesheet entry updated successfully",
     )
-
 
 
 @router.delete("/{timesheet_id}", response_model=dict, summary="Delete a timesheet entry")

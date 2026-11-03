@@ -78,13 +78,13 @@ import { SubmitTimesheet } from './components/employee/SubmitTimesheet';
 import { TimesheetsHistory } from './components/employee/TimesheetsHistory';
 import { MyProjects } from './components/employee/MyProjects';
 import { LeaveManagement } from './components/employee/LeaveManagement';
-import { WeekendWork } from './components/employee/WeekendWork';
+// import { WeekendWork } from './components/employee/WeekendWork';
 
 import { PMDashboard } from './components/pm/PMDashboard';
 import { PMMyProjects } from './components/pm/PMMyProjects';
 import { PMResourceAllocation } from './components/pm/PMResourceAllocation';
 import { PMTimesheetReview } from './components/pm/PMTimesheetReview';
-import { PMWeekendWorkRequests } from './components/pm/PMWeekendWorkRequests';
+// import { PMWeekendWorkRequests } from './components/pm/PMWeekendWorkRequests';
 
 import { AccountManagerDashboard } from './components/ac_manager/AccountManagerDashboard';
 
@@ -99,6 +99,51 @@ const WorkingCalendar = React.lazy(() => import('./components/admin/WorkingCalen
 // Initial mocks for things not yet in backend API endpoints
 import { INITIAL_LEAVE_BALANCE, INITIAL_ACTIVITIES, INITIAL_LEAVE_TYPES, INITIAL_WORKING_CALENDAR, INITIAL_SETTINGS } from './data/initialData';
 import { ErrorBoundary } from './components/ErrorBoundary';
+
+const isPortalAllowedForUser = (portal: ActivePortalMode, role: string | undefined): boolean => {
+  if (!role) return false;
+  const r = role.toLowerCase();
+  if (r.includes('admin')) return true;
+  if (r.includes('project') || r === 'pm') return portal === 'pm' || portal === 'employee';
+  if (r.includes('account') || r === 'ac_manager') return portal === 'ac_manager' || portal === 'employee';
+  return portal === 'employee';
+};
+
+const TAB_LABELS: Record<string, string> = {
+  // Employee
+  my_dashboard: 'My Dashboard',
+  submit_timesheet: 'Submit Timesheet',
+  timesheets_history: 'Timesheets History',
+  my_projects: 'Assigned Projects',
+  leave_management: 'Leave Management',
+  weekend_work: 'Weekend Work',
+
+  // PM
+  pm_dashboard: 'PM Dashboard',
+  pm_my_projects: 'My Projects',
+  pm_resource_allocation: 'Resource Allocation',
+  pm_submit_timesheet: 'Submit Timesheet',
+  pm_timesheets_history: 'Timesheet History',
+  pm_timesheet_review: 'Timesheet Review',
+  pm_weekend_work: 'Weekend Work',
+
+  // AC Manager
+  ac_dashboard: 'Portfolio Dashboard',
+  project_financials: 'Project Financials',
+  employee_utilization: 'Resource Utilization',
+  budget_vs_actual: 'Budget vs Actual',
+  tool_utilization: 'Tool Utilization',
+  ac_reports: 'Financial Reports',
+
+  // Admin
+  admin_overview: 'Admin Dashboard',
+  user_management: 'User Management',
+  admin_tools: 'Tool Management',
+  admin_holidays: 'Holidays',
+  admin_leave_types: 'Leave Types',
+  admin_working_calendar: 'Working Calendar',
+  admin_leave_approvals: 'Leave Approvals',
+};
 
 export default function App() {
   const dispatch = useDispatch();
@@ -194,13 +239,13 @@ export default function App() {
   // Local UI State — URL params take priority, then sessionStorage fallback, then default
   const _saved = _getSavedPage();
   const [activeEmployeeTab, setActiveEmployeeTab] = useState<EmployeeTab>(() => {
-    if (urlPortal === 'employee' && urlTab) return urlTab as EmployeeTab;
-    if (_saved.portal === 'employee' && _saved.tab) return _saved.tab as EmployeeTab;
+    if (urlPortal === 'employee' && urlTab && urlTab !== 'weekend_work') return urlTab as EmployeeTab;
+    if (_saved.portal === 'employee' && _saved.tab && _saved.tab !== 'weekend_work') return _saved.tab as EmployeeTab;
     return 'my_dashboard';
   });
   const [activePmTab, setActivePmTab] = useState<PMTab>(() => {
-    if (urlPortal === 'pm' && urlTab) return urlTab as PMTab;
-    if (_saved.portal === 'pm' && _saved.tab) return _saved.tab as PMTab;
+    if (urlPortal === 'pm' && urlTab && urlTab !== 'pm_weekend_work') return urlTab as PMTab;
+    if (_saved.portal === 'pm' && _saved.tab && _saved.tab !== 'pm_weekend_work') return _saved.tab as PMTab;
     return 'pm_dashboard';
   });
   const [activeAcTab, setActiveAcTab] = useState<ACManagerTab>(() => {
@@ -214,8 +259,20 @@ export default function App() {
     return 'admin_overview';
   });
 
-  // Track previous tab per portal so we can distinguish a real tab change from a re-render
+  // Track previous tab and portal so we can distinguish real navigation from re-renders
   const prevTabRef = React.useRef<{ portal: string; tab: string } | null>(null);
+  // Track previous navigation for "Go Back" across all portals and tabs
+  const [previousNav, setPreviousNav] = useState<{ portal: ActivePortalMode; tab: string; label: string } | null>(null);
+
+  // Clear navigation history when user logs in, logs out, or switches accounts
+  const currentUserIdRef = React.useRef<string | number | null>(currentUser?.id ?? null);
+  React.useEffect(() => {
+    if (currentUser?.id !== currentUserIdRef.current) {
+      currentUserIdRef.current = currentUser?.id ?? null;
+      setPreviousNav(null);
+      prevTabRef.current = null;
+    }
+  }, [currentUser?.id]);
 
   // Sync state changes to URL and sessionStorage (for browser-close/reopen restoration)
   React.useEffect(() => {
@@ -224,6 +281,7 @@ export default function App() {
       window.history.replaceState(null, '', window.location.pathname);
       try { sessionStorage.removeItem('ST_lastPage'); } catch { /* ignore */ }
       prevTabRef.current = null;
+      setPreviousNav(null);
       return;
     }
 
@@ -241,12 +299,16 @@ export default function App() {
     if (prev === null) {
       // First render after login — just set the URL, don't push history
       window.history.replaceState({ portal: portalMode, tab: activeTab }, '', newUrl);
-    } else if (prev.portal !== portalMode) {
-      // Portal mode switched (e.g. employee → pm) — replace, not push (not a page navigation)
-      window.history.replaceState({ portal: portalMode, tab: activeTab }, '', newUrl);
-    } else if (prev.tab !== activeTab) {
-      // Tab changed within the same portal — push a real history entry so Back/Forward works
+    } else if (prev.portal !== portalMode || prev.tab !== activeTab) {
+      // Portal mode or Tab changed — push a real history entry and track previous navigation
       window.history.pushState({ portal: portalMode, tab: activeTab }, '', newUrl);
+      if (prev.tab) {
+        setPreviousNav({
+          portal: prev.portal as ActivePortalMode,
+          tab: prev.tab,
+          label: TAB_LABELS[prev.tab] || prev.tab,
+        });
+      }
     } else {
       // Same portal + same tab (initial mount or re-render) — just replace silently
       window.history.replaceState({ portal: portalMode, tab: activeTab }, '', newUrl);
@@ -301,6 +363,8 @@ export default function App() {
         if (event.data === 'logout' && !isLoggingOut) {
           // Another tab logged out — mirror the logout here without calling the server again
           setIsLoggingOut(true);
+          setPreviousNav(null);
+          prevTabRef.current = null;
           dispatch(logout());
           dispatch(apiSlice.util.resetApiState());
         }
@@ -339,7 +403,7 @@ export default function App() {
   const isPm = currentUser?.role === 'pm';
 
   const { data: users = [] } = useGetUsersQuery(undefined, { skip });
-  const { data: projects = [] } = useGetProjectsQuery(undefined, { skip });
+  const { data: projects = [], refetch: refetchProjects } = useGetProjectsQuery(undefined, { skip });
   const { data: clients = [] } = useGetClientsQuery(undefined, { skip: skip || (!isPm && !isAdmin) });
   const { data: myTimesheets = [] } = useGetTimesheetsQuery(undefined, { skip });
   const { data: managedTimesheets = [] } = useGetManagedTimesheetsQuery(undefined, { skip: skip || !isPm });
@@ -437,6 +501,8 @@ export default function App() {
   const handleLogout = React.useCallback(() => {
     // 1. Prevent getCurrentUser from re-firing during this render cycle.
     setIsLoggingOut(true);
+    setPreviousNav(null);
+    prevTabRef.current = null;
 
     // 2. Clear user — component re-renders to <LoginPage /> immediately.
     dispatch(logout());
@@ -617,9 +683,15 @@ export default function App() {
     }
   }, [createClientMutation, showToast]);
 
+  const isCreatingProjectRef = React.useRef(false);
   const handleAddProject = React.useCallback(async (newProj: Omit<Project, 'id'>) => {
     if (!currentUser) return;
+    if (isCreatingProjectRef.current) {
+      showToast('Please wait', 'Project creation is already in progress. Please wait a moment.', 'warning');
+      return;
+    }
     try {
+      isCreatingProjectRef.current = true;
       const res = await createProjectMutation({
         client_id: newProj.client ? Number(newProj.client) : undefined,
         project_manager_id: Number(currentUser.id),
@@ -634,8 +706,32 @@ export default function App() {
     } catch (e: any) {
       showToast('Action Failed', getErrorMessage(e, 'Failed to create project'), 'error');
       throw e;
+    } finally {
+      isCreatingProjectRef.current = false;
     }
   }, [currentUser, createProjectMutation, showToast]);
+
+  const isDeletingProjectRef = React.useRef(false);
+  const handleDeleteProject = React.useCallback(async (projectId: string, permanent: boolean = false) => {
+    if (isDeletingProjectRef.current) {
+      showToast('Please wait', 'Project deletion is already in progress.', 'warning');
+      return;
+    }
+    try {
+      isDeletingProjectRef.current = true;
+      await deleteProjectMutation({ projectId, permanent }).unwrap();
+      if (permanent) {
+        showToast('Project Deleted', 'Project permanently deleted from database', 'success');
+      } else {
+        showToast('Project Deactivated', 'Project deactivated and moved to Inactive Projects', 'success');
+      }
+    } catch (e: any) {
+      showToast('Action Failed', getErrorMessage(e, 'Failed to delete project'), 'error');
+      throw e;
+    } finally {
+      isDeletingProjectRef.current = false;
+    }
+  }, [deleteProjectMutation, showToast]);
 
   const handleUpdateProject = React.useCallback(async (updatedProj: Project) => {
     try {
@@ -791,6 +887,27 @@ export default function App() {
   }, [deleteLeaveType, showToast]);
 
   // Memoized Sidebar & Header callbacks
+  const handleGoToPreviousTab = React.useCallback(() => {
+    if (!previousNav) return;
+    // Security check: verify user role is authorized for the target portal
+    if (!isPortalAllowedForUser(previousNav.portal, currentUser?.role)) {
+      setPreviousNav(null);
+      return;
+    }
+    if (previousNav.portal !== portalMode) {
+      dispatch(setPortalMode(previousNav.portal));
+    }
+    if (previousNav.portal === 'employee') {
+      setActiveEmployeeTab(previousNav.tab as EmployeeTab);
+    } else if (previousNav.portal === 'pm') {
+      setActivePmTab(previousNav.tab as PMTab);
+    } else if (previousNav.portal === 'ac_manager') {
+      setActiveAcTab(previousNav.tab as ACManagerTab);
+    } else if (previousNav.portal === 'admin') {
+      setActiveAdminTab(previousNav.tab as AdminTab);
+    }
+  }, [previousNav, portalMode, currentUser, dispatch]);
+
   const handleTogglePortalMode = React.useCallback((mode: ActivePortalMode) => {
     dispatch(setPortalMode(mode));
   }, [dispatch]);
@@ -884,6 +1001,11 @@ export default function App() {
         onLogout={handleLogout}
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebar={handleToggleSidebar}
+        previousTab={previousNav && isPortalAllowedForUser(previousNav.portal, currentUser?.role) ? {
+          tab: previousNav.tab,
+          label: previousNav.label,
+          onGoBack: handleGoToPreviousTab,
+        } : null}
       />
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -925,6 +1047,10 @@ export default function App() {
                       setEditingTimesheet(null);
                       setDefaultSubmitDate(null);
                     }
+                  }}
+                  onNavigateToSubmit={(date) => {
+                    setDefaultSubmitDate(date);
+                    setActiveEmployeeTab('submit_timesheet');
                   }}
                   onOpenMarkLeave={() => {
                     setOpenMarkLeaveModal(true);
@@ -968,7 +1094,7 @@ export default function App() {
                     setDefaultSubmitDate(date);
                     setActiveEmployeeTab('submit_timesheet');
                   }}
-                  onNavigateToWeekendWork={() => setActiveEmployeeTab('weekend_work')}
+                  // onNavigateToWeekendWork={() => setActiveEmployeeTab('weekend_work')}
                   onShowToast={showToast}
                 />
               )}
@@ -993,6 +1119,7 @@ export default function App() {
                 />
               )}
 
+              {/* Weekend work request flow commented out for now
               {activeEmployeeTab === 'weekend_work' && (
                 <WeekendWork
                   currentUser={currentUser}
@@ -1002,7 +1129,7 @@ export default function App() {
                   onRequestWeekendWork={handleRequestWeekendWork}
                   onShowToast={showToast}
                 />
-              )}
+              )} */}
             </>
           )}
 
@@ -1029,6 +1156,7 @@ export default function App() {
                   timesheets={timesheets}
                   onAddProject={handleAddProject}
                   onUpdateProject={handleUpdateProject}
+                  onDeleteProject={handleDeleteProject}
                   onCreateClient={handleCreateClient}
                   onAssignUserToProject={handleAssignUserToProject}
                   onRemoveUserFromProject={handleRemoveUserFromProject}
@@ -1090,7 +1218,7 @@ export default function App() {
                     setDefaultSubmitDate(date);
                     setActivePmTab('pm_submit_timesheet');
                   }}
-                  onNavigateToWeekendWork={() => setActivePmTab('pm_weekend_work')}
+                  // onNavigateToWeekendWork={() => setActivePmTab('pm_weekend_work')}
                   onShowToast={showToast}
                 />
               )}
@@ -1104,6 +1232,7 @@ export default function App() {
                 />
               )}
 
+              {/* Weekend work request flow commented out for now
               {activePmTab === 'pm_weekend_work' && (
                 <PMWeekendWorkRequests
                   currentUser={currentUser}
@@ -1114,7 +1243,7 @@ export default function App() {
                   onRejectWeekendWork={handleRejectWeekendWork}
                   onShowToast={showToast}
                 />
-              )}
+              )} */}
             </>
           )}
 

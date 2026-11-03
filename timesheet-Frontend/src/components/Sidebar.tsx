@@ -154,6 +154,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         icon: FolderKanban,
         desc: 'Sprint Projects & Tools',
       },
+      /* Weekend work request flow commented out for now
       {
         id: 'weekend_work',
         label: 'Weekend Work Requests',
@@ -161,6 +162,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         desc: 'Overtime & Pre-approvals',
         badge: pendingWeekendCount > 0 ? pendingWeekendCount : undefined,
       },
+      */
     ];
 
   const pmNavItems: Array<{
@@ -207,6 +209,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         desc: 'Read-Only Team Logs',
         badge: pendingTimesheetsCount > 0 ? pendingTimesheetsCount : undefined,
       },
+      /* Weekend work request flow commented out for now
       {
         id: 'pm_weekend_work',
         label: 'Weekend Work Requests',
@@ -214,6 +217,7 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         desc: 'Approve Weekend Overtime',
         badge: pendingWeekendCount > 0 ? pendingWeekendCount : undefined,
       },
+      */
     ];
 
   const acNavItems: Array<{

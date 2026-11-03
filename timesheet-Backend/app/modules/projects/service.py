@@ -1,5 +1,6 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple
 from pathlib import Path
+import time
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import HTTPException, UploadFile, status
@@ -18,6 +19,15 @@ from app.common.file_handler import (
     ALLOWED_DOCUMENT_EXTENSIONS,
 )
 from app.services.storage_service import storage_service
+
+_PROJECT_CACHE: Dict[str, Tuple[float, List[ProjectResponse]]] = {}
+_CACHE_TTL_SECONDS: float = 45.0
+
+
+def invalidate_project_cache():
+    """Invalidates the in-memory projects cache across all users/roles."""
+    global _PROJECT_CACHE
+    _PROJECT_CACHE.clear()
 
 
 class ProjectService:
@@ -62,11 +72,22 @@ class ProjectService:
         return financials[0]
 
     async def get_all_projects(self, skip: int = 0, limit: int = 100, is_active: Optional[bool] = None, current_user: Optional[User] = None) -> List[ProjectResponse]:
+        now = time.time()
+        user_id = current_user.id if current_user else 0
+        role_id = getattr(current_user, "role_id", 0)
+        cache_key = f"{user_id}_{role_id}_{skip}_{limit}_{is_active}"
+
+        cached = _PROJECT_CACHE.get(cache_key)
+        if cached and (now - cached[0] < _CACHE_TTL_SECONDS):
+            return cached[1]
+
         pm_filter = None
         if self._is_pm(current_user):
             pm_filter = current_user.id
         projects = await self.repository.get_all(skip=skip, limit=limit, is_active=is_active, project_manager_id=pm_filter)
-        return await self.compute_financials_for_projects(self.db, projects, current_user=current_user)
+        res = await self.compute_financials_for_projects(self.db, projects, current_user=current_user)
+        _PROJECT_CACHE[cache_key] = (now, res)
+        return res
 
     @staticmethod
     async def compute_financials_for_projects(db: AsyncSession, projects: list, current_user: Optional[User] = None) -> List[ProjectResponse]:
@@ -76,6 +97,7 @@ class ProjectService:
         from app.common.financial_engine import FinancialEngine
         from app.modules.milestones.model import Milestone
         from app.modules.milestones.assignment_model import MilestoneAssignment
+        from app.modules.tool_allocations.model import ToolAllocation
         from app.modules.milestones.schema import MilestoneResponse
         from datetime import date
         from sqlalchemy import select
@@ -84,17 +106,29 @@ class ProjectService:
         engine = FinancialEngine(db)
         project_ids = [p.id for p in projects]
 
+        # Check if projects already have milestones loaded (from repository eager load)
+        has_milestones = False
         try:
-            m_stmt = select(Milestone).options(
-                selectinload(Milestone.assignments).selectinload(MilestoneAssignment.user)
-            ).where(Milestone.project_id.in_(project_ids))
-            m_res = await db.execute(m_stmt)
-            all_milestones = m_res.scalars().unique().all()
-            milestone_map = {}
-            for m in all_milestones:
-                milestone_map.setdefault(m.project_id, []).append(m)
+            if projects and hasattr(projects[0], "milestones") and "milestones" in projects[0].__dict__:
+                has_milestones = True
         except Exception:
-            milestone_map = {}
+            pass
+
+        if not has_milestones:
+            try:
+                m_stmt = select(Milestone).options(
+                    selectinload(Milestone.assignments).selectinload(MilestoneAssignment.user),
+                    selectinload(Milestone.tool_allocations).selectinload(ToolAllocation.tool)
+                ).where(Milestone.project_id.in_(project_ids))
+                m_res = await db.execute(m_stmt)
+                all_milestones = m_res.scalars().unique().all()
+                milestone_map = {}
+                for m in all_milestones:
+                    milestone_map.setdefault(m.project_id, []).append(m)
+            except Exception:
+                milestone_map = {}
+        else:
+            milestone_map = {p.id: p.milestones for p in projects}
 
         role_name = ""
         if current_user:
@@ -112,19 +146,76 @@ class ProjectService:
         today = date.today()
         results = []
 
-        for p in projects:
-            if not hasattr(p, 'milestones'):
-                p.milestones = milestone_map.get(p.id, [])
-            else:
-                p.milestones = milestone_map.get(p.id, [])
+        # =========================================================================
+        # PERFORMANCE OPTIMIZATION:
+        # If user cannot view budget (e.g. Employee), bypass the heavy N*M*K financial
+        # engine loops completely! Aggregate logged_hours in a single bulk query.
+        # =========================================================================
+        if not can_view_budget:
+            from app.modules.timesheets.model import Timesheet
+            from app.modules.project_assignments.model import ProjectAssignment
+            from sqlalchemy import func
 
-            total_weight = sum([float(m.weight_percentage) for m in p.milestones])
+            lh_stmt = (
+                select(
+                    ProjectAssignment.project_id,
+                    func.coalesce(func.sum(Timesheet.billable_hours + Timesheet.non_billable_hours), 0.0).label("logged_hours")
+                )
+                .join(Timesheet, Timesheet.project_assignment_id == ProjectAssignment.id)
+                .where(
+                    ProjectAssignment.project_id.in_(project_ids),
+                    Timesheet.status == "submitted"
+                )
+                .group_by(ProjectAssignment.project_id)
+            )
+            lh_res = await db.execute(lh_stmt)
+            logged_hours_map = {row[0]: float(row[1]) for row in lh_res.all()}
+
+            for p in projects:
+                p_milestones = milestone_map.get(p.id, [])
+                m_responses = []
+                total_progress = 0.0
+                for m in p_milestones:
+                    m_resp = MilestoneResponse.model_validate(m)
+                    if str(m.status).lower() == "achieved":
+                        m_resp.completion_percentage = 100.0
+                        total_progress += m.weight_percentage
+                    elif str(m.status).lower() == "in_progress":
+                        m_prog = getattr(m, "completion_percentage", 0.0) or 35.0
+                        m_resp.completion_percentage = m_prog
+                        total_progress += (m.weight_percentage * (m_prog / 100.0))
+                    else:
+                        m_resp.completion_percentage = m.completion_percentage or 0.0
+                    m_responses.append(m_resp)
+
+                resp = ProjectResponse.model_validate(p)
+                resp.milestones = m_responses
+                resp.completion_percentage = round(min(100.0, total_progress), 1)
+                resp.logged_hours = logged_hours_map.get(p.id, 0.0)
+                resp.budget = None
+                resp.cost = 0.0
+                resp.actual_cost = 0.0
+                resp.earned_value = 0.0
+                resp.revenue = 0.0
+                resp.profit = 0.0
+                resp.cost_variance = 0.0
+                resp.cpi = 0.0
+                resp.forecast_cost = 0.0
+                resp.health = "GREEN"
+                resp.financial_status = "N/A"
+                results.append(resp)
+            return results
+
+        # Budget viewer path (Admin / Account Manager):
+        for p in projects:
+            p_milestones = milestone_map.get(p.id, getattr(p, "milestones", []))
+            total_weight = sum([float(m.weight_percentage) for m in p_milestones])
             valid_weight = abs(total_weight - 100.0) < 0.001
 
             fin_data = await engine.compute_project_financials(p)
             
             m_responses = []
-            for m in p.milestones:
+            for m in p_milestones:
                 m_fin = fin_data["milestone_financials"].get(m.id, {})
                 
                 delay_days = 0
@@ -187,7 +278,14 @@ class ProjectService:
 
             resp = ProjectResponse.model_validate(p)
             resp.milestones = m_responses
-            resp.completion_percentage = sum([m.weight_percentage for m in p.milestones if m.status == "achieved"])
+            total_progress = 0.0
+            for m in p_milestones:
+                if str(m.status).lower() == "achieved":
+                    total_progress += m.weight_percentage
+                elif str(m.status).lower() == "in_progress":
+                    m_prog = getattr(m, "completion_percentage", 0.0) or 35.0
+                    total_progress += (m.weight_percentage * (m_prog / 100.0))
+            resp.completion_percentage = round(min(100.0, total_progress), 1)
             resp.logged_hours = fin_data["logged_hours"]
             resp.cost = project_ac
             resp.actual_cost = project_ac
@@ -218,6 +316,7 @@ class ProjectService:
         return results
 
     async def create_project(self, project_in: ProjectCreate, current_user: Optional[User] = None) -> ProjectResponse:
+        invalidate_project_cache()
         # If current_user is a PM, force project_manager_id to be current_user.id so they cannot create projects for other PMs
         if self._is_pm(current_user):
             project_in.project_manager_id = current_user.id
@@ -255,6 +354,7 @@ class ProjectService:
         return financials[0]
 
     async def update_project(self, project_id: int, project_in: ProjectUpdate, current_user: Optional[User] = None) -> ProjectResponse:
+        invalidate_project_cache()
         project = await self.repository.get_by_id(project_id)
         if not project:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -289,7 +389,8 @@ class ProjectService:
         financials = await self.compute_financials_for_projects(self.db, [updated_project], current_user=current_user)
         return financials[0]
 
-    async def delete_project(self, project_id: int, current_user: Optional[User] = None) -> None:
+    async def delete_project(self, project_id: int, permanent: bool = False, current_user: Optional[User] = None) -> None:
+        invalidate_project_cache()
         project = await self.repository.get_by_id(project_id)
         if not project:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -299,9 +400,51 @@ class ProjectService:
                 detail="Forbidden: You do not have permission to delete another Project Manager's project."
             )
         
-        await self.repository.soft_delete(project)
+        # If permanent is requested OR if project is already inactive, perform complete hard delete
+        if permanent or not project.is_active:
+            from app.modules.timesheets.model import Timesheet
+            from app.modules.project_assignments.model import ProjectAssignment
+            from app.modules.weekend_work.model import WeekendWorkRequest
+            from sqlalchemy import select, delete
+
+            # 1. Fetch all project assignments
+            assignment_res = await self.db.execute(
+                select(ProjectAssignment.id).where(ProjectAssignment.project_id == project_id)
+            )
+            assignment_ids = list(assignment_res.scalars().all())
+            if assignment_ids:
+                # 2. Delete all timesheets logged under this project's assignments
+                await self.db.execute(
+                    delete(Timesheet).where(Timesheet.project_assignment_id.in_(assignment_ids))
+                )
+                # 3. Delete any weekend work requests tied to this project's assignments
+                await self.db.execute(
+                    delete(WeekendWorkRequest).where(WeekendWorkRequest.project_assignment_id.in_(assignment_ids))
+                )
+                # 4. Delete the project assignments
+                await self.db.execute(
+                    delete(ProjectAssignment).where(ProjectAssignment.id.in_(assignment_ids))
+                )
+
+            # 5. Clean up uploaded physical files
+            for doc in (project.documents or []):
+                try:
+                    if storage_service.is_configured and not doc.file_path.startswith("/uploads") and not doc.file_path.startswith("http"):
+                        storage_service.delete_file(doc.file_path)
+                    else:
+                        rel_path = doc.file_path.lstrip("/")
+                        delete_file(rel_path)
+                except Exception:
+                    pass
+
+            # 6. Hard delete the project (milestones, milestone_assignments, tool_allocations, project_documents cascade)
+            await self.repository.delete(project)
+        else:
+            # Stage 1: Soft delete (deactivate)
+            await self.repository.soft_delete(project)
 
     async def upload_document(self, project_id: int, file: UploadFile, current_user: Optional[User] = None) -> ProjectDocumentResponse:
+        invalidate_project_cache()
         project = await self.repository.get_by_id(project_id)
         if not project:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -355,6 +498,7 @@ class ProjectService:
         return ProjectDocumentResponse.model_validate(saved_doc)
 
     async def delete_document(self, project_id: int, document_id: int, current_user: Optional[User] = None) -> None:
+        invalidate_project_cache()
         project = await self.repository.get_by_id(project_id)
         if not project:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")

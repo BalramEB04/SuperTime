@@ -7,6 +7,7 @@ class ToolCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     category: str = Field(..., min_length=1, max_length=50)
     cost_per_month: float = Field(default=0.0, ge=0.0)
+    status: Optional[str] = Field(default="Active", max_length=20)
 
 
 class ToolUpdate(BaseModel):
