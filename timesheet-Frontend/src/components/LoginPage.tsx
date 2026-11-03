@@ -27,9 +27,11 @@ export const LoginPage: React.FC = () => {
       setAuthError(null);
 
       try {
-         const authData = await loginWithGoogle(response.credential).unwrap();
+         const authData: any = await loginWithGoogle(response.credential).unwrap();
          dispatch(setCredentials({
             user: authData.user,
+            accessToken: authData.accessToken || authData.access_token,
+            refreshToken: authData.refreshToken || authData.refresh_token,
          }));
       } catch (err: any) {
          setAuthError(err?.data?.message || err.message || 'Google SSO Authentication failed');
@@ -37,7 +39,12 @@ export const LoginPage: React.FC = () => {
    };
 
    useEffect(() => {
-      const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '146072997584-and6rpntvi6fi6gvvthkp8c37spr6snn.apps.googleusercontent.com';
+      const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+      if (!googleClientId) {
+         setAuthError('Google Client ID is not configured. Please set GOOGLE_CLIENT_ID in your .env file.');
+         return;
+      }
 
       const tryRenderGoogleButton = (): boolean => {
          if (typeof window !== 'undefined' && (window as any).google?.accounts?.id) {
@@ -214,8 +221,8 @@ export const LoginPage: React.FC = () => {
                            <span className="text-blue-700 font-semibold text-[15px]">Connecting...</span>
                         </div>
                      )}
-                     <div 
-                        id="google-sso-btn-container" 
+                     <div
+                        id="google-sso-btn-container"
                         className={`flex justify-center w-full hover:scale-[1.02] transition-transform duration-200 ${isGoogleSigningIn ? 'opacity-0 pointer-events-none absolute' : ''}`}
                      ></div>
                   </div>

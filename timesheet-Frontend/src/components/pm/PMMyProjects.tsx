@@ -26,7 +26,6 @@ import {
   Wrench,
   Clock,
   Edit3,
-  UserPlus,
   Trash2,
   CheckCircle2,
   Calendar,
@@ -55,6 +54,7 @@ interface PMMyProjectsProps {
   timesheets: TimesheetEntry[];
   onAddProject: (project: Omit<Project, 'id'>) => void;
   onUpdateProject: (updatedProject: Project) => void;
+  onDeleteProject?: (projectId: string, permanent?: boolean) => Promise<void> | void;
   onCreateClient: (name: string, contactInfo?: string) => Promise<any> | void;
   onAssignUserToProject: (projectId: string, userId: string) => void;
   onRemoveUserFromProject: (projectId: string, userId: string) => void;
@@ -97,6 +97,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
   timesheets = [],
   onAddProject,
   onUpdateProject,
+  onDeleteProject,
   onCreateClient,
   onAssignUserToProject,
   onRemoveUserFromProject,
@@ -170,6 +171,28 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
 
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
+
+  const handleConfirmDelete = async () => {
+    if (!deletingProject || !onDeleteProject) return;
+    if (isDeletingProject) return;
+    const isAlreadyInactive = deletingProject.isActive === false || deletingProject.is_active === false;
+    try {
+      setIsDeletingProject(true);
+      await onDeleteProject(deletingProject.id, isAlreadyInactive);
+      setDeletingProject(null);
+      if (selectedProject?.id === deletingProject.id) {
+        setSelectedProject(null);
+        updateUrlProjectId(null);
+      }
+    } catch (err) {
+      // handled in parent toast
+    } finally {
+      setIsDeletingProject(false);
+    }
+  };
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showAddToolModal, setShowAddToolModal] = useState(false);
@@ -221,13 +244,13 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
     description: string;
     start_date: string;
     expected_completion_date: string;
-    weight_percentage: number;
+    weight_percentage: number | '';
   }>({
     name: '',
     description: '',
     start_date: new Date().toISOString().split('T')[0],
     expected_completion_date: new Date(new Date().setDate(new Date().getDate() + 10)).toISOString().split('T')[0],
-    weight_percentage: 10,
+    weight_percentage: '',
   });
 
   // Edit Milestone Form
@@ -275,12 +298,12 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
       p.client.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus =
       statusFilter === 'all'
-        ? true
+        ? (p.isActive !== false && p.is_active !== false)
         : statusFilter === 'active'
           ? p.isActive !== false && p.is_active !== false
           : statusFilter === 'inactive'
             ? p.isActive === false || p.is_active === false
-            : p.status === statusFilter || formatStatusName(p.status) === statusFilter;
+            : (p.isActive !== false && p.is_active !== false) && (p.status === statusFilter || formatStatusName(p.status) === statusFilter);
     return matchesSearch && matchesStatus;
   });
 
@@ -333,12 +356,17 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isCreatingProject) {
+      onShowToast('Please wait', 'Project creation is already in progress. Please wait a moment.', 'warning');
+      return;
+    }
     if (!newProject.name) {
       onShowToast('Validation Error', 'Please enter a project name.', 'error');
       return;
     }
 
     try {
+      setIsCreatingProject(true);
       setIsUploadingDocs(true);
       const res: any = await onAddProject({
         name: newProject.name,
@@ -363,12 +391,12 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
         for (const file of selectedCreateFiles) {
           try {
             await uploadProjectDoc({ projectId: String(newProjId), file }).unwrap();
-          } catch (docErr) {
+          } catch (docErr: any) {
             console.error('Failed to upload document:', docErr);
+            onShowToast('Document Upload Warning', docErr?.data?.message || docErr?.data?.detail || 'Failed to upload document', 'warning');
           }
         }
       }
-
       onShowToast('Project Created', `Successfully created ${newProject.name}`, 'success');
       setShowCreateModal(false);
       setSelectedCreateFiles([]);
@@ -384,6 +412,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
     } catch (err) {
       // toast already handled
     } finally {
+      setIsCreatingProject(false);
       setIsUploadingDocs(false);
     }
   };
@@ -626,7 +655,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
         description: '',
         start_date: new Date().toISOString().split('T')[0],
         expected_completion_date: new Date(new Date().setDate(new Date().getDate() + 10)).toISOString().split('T')[0],
-        weight_percentage: 10,
+        weight_percentage: '',
       });
       // We don't locally update selectedProject here, rely on RTK query invalidation which refreshes the project list.
       // Alternatively, we could refresh the modal or let the user close and open it.
@@ -663,6 +692,15 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
     }
   };
 
+  const handleUpdateMilestoneProgress = async (milestoneId: number, completion_percentage: number) => {
+    try {
+      await updateMilestone({ id: milestoneId, completion_percentage }).unwrap();
+      onShowToast('Progress Updated', `Milestone progress updated to ${completion_percentage}%.`, 'success');
+    } catch (err: any) {
+      onShowToast('Error', err?.data?.detail || 'Failed to update milestone progress', 'error');
+    }
+  };
+
   const handleUpdateMilestoneStatus = async (milestoneId: number, status: string, additionalData: any = {}) => {
     try {
       if (status === 'achieved' && !additionalData.actual_achievement_date) {
@@ -670,6 +708,17 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
         setAchieveDate(new Date().toISOString().split('T')[0]);
         setShowAchieveModal(true);
         return;
+      }
+
+      if (status === 'achieved') {
+        additionalData.completion_percentage = 100;
+      } else if (status === 'in_progress') {
+        const target = (selectedProject?.milestones || []).find((m) => m.id === milestoneId);
+        if (!target?.completion_percentage || target.completion_percentage === 0) {
+          additionalData.completion_percentage = 35;
+        }
+      } else if (status === 'planned') {
+        additionalData.completion_percentage = 0;
       }
 
       await updateMilestone({ id: milestoneId, status, ...additionalData }).unwrap();
@@ -776,8 +825,21 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                 >
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-black font-mono text-blue-700 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-100 opacity-0">
-                      </span>
+                      <div className="flex items-center gap-1">
+                        {onDeleteProject && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeletingProject(proj);
+                            }}
+                            className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                            title="Delete Project"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5 flex-wrap justify-end">
                         {proj.isActive !== false && proj.is_active !== false ? (
                           <>
@@ -939,6 +1001,16 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
               </div>
 
               <div className="relative z-10 flex items-center gap-3">
+                {onDeleteProject && (
+                  <button
+                    type="button"
+                    onClick={() => setDeletingProject(selectedProject)}
+                    className="px-4 py-2.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-2 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete Project</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -1027,9 +1099,9 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                   </div>
 
                   <div className="space-y-2 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <h3 className="font-extrabold text-slate-900 text-sm">Description</h3>
+                    <h3 className="font-extrabold text-slate-900 text-sm">Scope</h3>
                     <p className="text-slate-700 leading-relaxed font-medium">
-                      {selectedProject.description || 'No detailed description provided.'}
+                      {selectedProject.description || 'No detailed scope provided.'}
                     </p>
                   </div>
 
@@ -1044,12 +1116,12 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                     </div>
                   </div>
 
-                  {/* Supporting Documents Section in Details Tab */}
+                  {/* Documents upload Section in Details Tab */}
                   <div className="space-y-3 bg-slate-50 p-5 rounded-2xl border border-slate-200">
                     <div className="flex items-center justify-between">
                       <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
                         <Paperclip className="w-4 h-4 text-indigo-600" />
-                        <span>Supporting Documents ({(selectedProject.documents || []).length})</span>
+                        <span>Documents upload ({(selectedProject.documents || []).length})</span>
                       </h3>
                       <button
                         type="button"
@@ -1113,13 +1185,6 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                       <h3 className="font-extrabold text-slate-900 text-sm">Assigned Employees</h3>
                       <p className="text-slate-500 text-[11px]">Team members working on this project</p>
                     </div>
-                    <button
-                      onClick={() => setShowAssignModal(true)}
-                      className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5"
-                    >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      <span>Assign Employee</span>
-                    </button>
                   </div>
 
                   <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden bg-white">
@@ -1324,6 +1389,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                             <th className="py-2.5 px-3">Start Date</th>
                             <th className="py-2.5 px-3">Weight</th>
                             <th className="py-2.5 px-3">Status</th>
+                            <th className="py-2.5 px-3">Progress</th>
                             <th className="py-2.5 px-3 text-right">Actions</th>
                           </tr>
                         </thead>
@@ -1350,6 +1416,31 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                                   <option value="in_progress">In Progress</option>
                                   <option value="achieved">Achieved</option>
                                 </select>
+                              </td>
+                              <td className="py-3 px-3">
+                                {m.status === 'in_progress' ? (
+                                  <div className="flex items-center gap-1.5 min-w-[110px]">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max="99"
+                                      value={m.completion_percentage ?? 35}
+                                      onChange={(e) => {
+                                        const val = Math.min(99, Math.max(0, Number(e.target.value) || 0));
+                                        handleUpdateMilestoneProgress(m.id, val);
+                                      }}
+                                      className="w-14 px-1.5 py-0.5 bg-slate-50 border border-slate-300 rounded text-[11px] font-bold text-blue-700 text-center"
+                                      title="Update progress %"
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-500">%</span>
+                                  </div>
+                                ) : m.status === 'achieved' ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                    100%
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400 font-medium italic">0%</span>
+                                )}
                               </td>
                               <td className="py-3 px-3 text-right">
                                 <div className="flex items-center justify-end gap-2">
@@ -1403,8 +1494,9 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
               <h3 className="text-base font-black text-slate-900">Create New Project</h3>
               <button
                 type="button"
+                disabled={isCreatingProject || isUploadingDocs}
                 onClick={() => setShowCreateModal(false)}
-                className="p-1.5 rounded-lg bg-slate-100 text-slate-500 hover:text-slate-800"
+                className="p-1.5 rounded-lg bg-slate-100 text-slate-500 hover:text-slate-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1477,7 +1569,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Description</label>
+              <label className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Scope</label>
               <textarea
                 rows={3}
                 value={newProject.description}
@@ -1487,10 +1579,10 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
               />
             </div>
 
-            {/* Supporting Documents Upload Field */}
+            {/* Documents upload Field */}
             <div className="space-y-1.5 pt-1">
               <label className="font-bold text-slate-700 uppercase tracking-wider text-[10px] flex items-center justify-between">
-                <span>Supporting Documents</span>
+                <span>Documents upload</span>
                 <span className="text-[10px] text-slate-400 font-normal">PDF, DOCX, XLSX, Images (Max 10MB)</span>
               </label>
               <div className="border-2 border-dashed border-slate-200 hover:border-blue-400 bg-slate-50/70 rounded-2xl p-4 transition-all text-center">
@@ -1549,21 +1641,105 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
             <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
               <button
                 type="button"
+                disabled={isCreatingProject || isUploadingDocs}
                 onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-semibold"
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
+                disabled={isCreatingProject || isUploadingDocs}
+                onClick={(e) => {
+                  if (isCreatingProject) {
+                    e.preventDefault();
+                    onShowToast('Please wait', 'Project creation is already in progress. Please wait a moment.', 'warning');
+                  }
+                }}
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer shadow-xs active:scale-95"
               >
-                Create Project
+                {isCreatingProject ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>Creating Project...</span>
+                  </>
+                ) : (
+                  <span>Create Project</span>
+                )}
               </button>
             </div>
           </form>
         </div>
       )}
+
+      {/* DELETE / DEACTIVATE PROJECT CONFIRMATION MODAL */}
+      {deletingProject && (() => {
+        const isAlreadyInactive = deletingProject.isActive === false || deletingProject.is_active === false;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
+            <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${isAlreadyInactive ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'}`}>
+                  <AlertCircle className={`w-5 h-5 ${isAlreadyInactive ? 'text-rose-600' : 'text-amber-600'}`} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    {isAlreadyInactive ? 'Permanently Delete Project' : 'Deactivate Project'}
+                  </h3>
+                  <p className={`text-xs ${isAlreadyInactive ? 'text-rose-500 font-semibold' : 'text-slate-500'}`}>
+                    {isAlreadyInactive
+                      ? 'This action cannot be undone and will permanently remove this project.'
+                      : 'This project will be made inactive and hidden from active operations.'}
+                  </p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {isAlreadyInactive ? (
+                  <>
+                    Are you sure you want to permanently delete <span className="font-bold text-slate-900">{deletingProject.name}</span>? This will permanently remove the project, milestones, team assignments, documents, and associated timesheets from the database.
+                  </>
+                ) : (
+                  <>
+                    Are you sure you want to deactivate <span className="font-bold text-slate-900">{deletingProject.name}</span>? It will disappear from your active projects list. You can view or permanently delete it anytime under the <span className="font-semibold text-slate-800">Inactive Projects</span> filter.
+                  </>
+                )}
+              </p>
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={isDeletingProject}
+                  onClick={() => setDeletingProject(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs disabled:opacity-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingProject}
+                  onClick={handleConfirmDelete}
+                  className={`px-4 py-2 rounded-xl text-white font-bold text-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 ${
+                    isAlreadyInactive
+                      ? 'bg-rose-600 hover:bg-rose-700'
+                      : 'bg-amber-600 hover:bg-amber-700'
+                  }`}
+                >
+                  {isDeletingProject ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>{isAlreadyInactive ? 'Deleting...' : 'Deactivating...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{isAlreadyInactive ? 'Permanently Delete' : 'Deactivate Project'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* EDIT PROJECT DETAILS MODAL */}
       {showEditModal && editFormData && (
@@ -1659,7 +1835,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Description</label>
+              <label className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Scope</label>
               <textarea
                 rows={3}
                 value={editFormData.description}
@@ -1668,11 +1844,11 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
               />
             </div>
 
-            {/* Supporting Documents Section in Edit Modal */}
+            {/* Documents upload Section in Edit Modal */}
             <div className="space-y-2 pt-1 border-t border-slate-100">
               <div className="flex items-center justify-between">
                 <label className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">
-                  Supporting Documents ({(editFormData.documents || []).length})
+                  Documents upload ({(editFormData.documents || []).length})
                 </label>
                 <label
                   htmlFor="edit_project_docs_input"
@@ -1777,6 +1953,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                 <option value="">-- Select an employee --</option>
                 {allUsers
                   .filter((u) => u.role === 'employee')
+                  .filter((u) => u.status === 'active')
                   .filter((u) => !(selectedProject.assignedUserIds || []).map(String).includes(String(u.id)))
                   .map((u) => (
                     <option key={u.id} value={u.id}>
@@ -2043,8 +2220,9 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                   min="0"
                   max="100"
                   required
+                  placeholder="e.g. 25"
                   value={newMilestone.weight_percentage}
-                  onChange={(e) => setNewMilestone({ ...newMilestone, weight_percentage: Number(e.target.value) })}
+                  onChange={(e) => setNewMilestone({ ...newMilestone, weight_percentage: e.target.value === '' ? '' : Number(e.target.value) })}
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900"
                 />
               </div>

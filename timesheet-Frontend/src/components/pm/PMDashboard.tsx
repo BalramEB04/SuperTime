@@ -224,7 +224,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = React.memo(({
             <span>Project Manager Portal</span>
           </h1>
           <p className="text-xs text-slate-500 max-w-2xl leading-relaxed">
-            Welcome back, <span className="font-bold text-slate-800">{currentUser.name}</span>. Track active sprint delivery, review employee timesheet logs, manage team allocations, and approve weekend overtime requests.
+            Welcome back, <span className="font-bold text-slate-800">{currentUser.name}</span>. Track active sprint delivery, review employee timesheet logs, and manage team allocations.
           </p>
         </div>
 
@@ -246,8 +246,8 @@ export const PMDashboard: React.FC<PMDashboardProps> = React.memo(({
         </div>
       </div>
 
-      {/* 5-Card KPI Grid with Combined Week Billable / Non-Billable Card */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      {/* 4-Card KPI Grid (Weekend OT commented out for now) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Active Projects */}
         <div
           onClick={() => onNavigateTab('pm_my_projects')}
@@ -305,7 +305,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = React.memo(({
           </p>
         </div>
 
-        {/* Pending Weekend Requests */}
+        {/* Pending Weekend Requests - commented out for now
         <div
           onClick={() => onNavigateTab('pm_weekend_work')}
           className="p-4 bg-white border border-slate-200 space-y-1.5 hover:border-amber-400 transition-all cursor-pointer group shadow-2xs"
@@ -319,6 +319,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = React.memo(({
           <div className="text-2xl font-bold text-amber-600">{pendingWeekendRequests.length}</div>
           <p className="text-[11px] text-amber-700 font-semibold truncate">Pending approvals</p>
         </div>
+        */}
 
         {/* Team Leaves */}
         <div

@@ -6,16 +6,22 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import app.core.models  # noqa: F401
 from app.api.router import api_router
 from app.common.responses import error_response
 from app.core.config import settings
-from app.scheduler.scheduler import start_scheduler, shutdown_scheduler
+from app.scheduler.scheduler import start_scheduler, shutdown_scheduler, ping_database_keepalive
 
 logger = logging.getLogger("app.main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Pre-warm connection pool on startup
+    try:
+        await ping_database_keepalive()
+    except Exception as e:
+        logger.warning(f"Initial DB keepalive warm-up failed: {e}")
     start_scheduler()
     yield
     shutdown_scheduler()

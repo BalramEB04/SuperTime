@@ -30,3 +30,5 @@ timesheet-Backend/uploads/
 Thumbs.db
 .agents/
 graphify-out/
+.neon
+node_modules/

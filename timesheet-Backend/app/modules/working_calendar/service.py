@@ -14,4 +14,10 @@ class WorkingCalendarService:
     @staticmethod
     async def update_config(db: AsyncSession, data: WorkingCalendarUpdate) -> WorkingCalendar:
         config = await WorkingCalendarService.get_config(db)
-        return await WorkingCalendarRepository.update(db, config, **data.model_dump(exclude_unset=True))
+        updated = await WorkingCalendarRepository.update(db, config, **data.model_dump(exclude_unset=True))
+        try:
+            from app.common.working_days_calculator import invalidate_working_calendar_cache
+            invalidate_working_calendar_cache()
+        except Exception:
+            pass
+        return updated

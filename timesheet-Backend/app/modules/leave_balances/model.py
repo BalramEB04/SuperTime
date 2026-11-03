@@ -4,6 +4,7 @@ from sqlalchemy import DateTime, Float, ForeignKey, Integer, UniqueConstraint, f
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.modules.leave_types.model import LeaveType
 
 
 class LeaveBalance(Base):

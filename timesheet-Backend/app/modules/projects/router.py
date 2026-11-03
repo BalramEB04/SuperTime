@@ -1,5 +1,7 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from pathlib import Path
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import RedirectResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.responses import created_response, success_response
@@ -8,8 +10,6 @@ from app.dependencies.auth import get_current_active_user
 from app.dependencies.permissions import require_roles
 from app.modules.projects.schema import ProjectCreate, ProjectUpdate, ProjectResponse
 from app.modules.projects.service import ProjectService
-
-
 from app.modules.users.model import User
 
 router = APIRouter()
@@ -67,12 +67,14 @@ async def update_project(
 @router.delete("/{project_id}", response_model=dict, dependencies=[Depends(pm_only)])
 async def delete_project(
     project_id: int,
+    permanent: bool = Query(False, description="Whether to permanently hard delete the project"),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     service = ProjectService(db)
-    await service.delete_project(project_id, current_user=current_user)
-    return success_response(message="Project deleted successfully")
+    await service.delete_project(project_id, current_user=current_user, permanent=permanent)
+    msg = "Project permanently deleted successfully" if permanent else "Project deactivated successfully"
+    return success_response(message=msg)
 
 
 @router.post("/{project_id}/documents", response_model=dict, status_code=status.HTTP_201_CREATED, dependencies=[Depends(project_manage_roles)])
@@ -97,3 +99,29 @@ async def delete_project_document(
     service = ProjectService(db)
     await service.delete_document(project_id, document_id, current_user=current_user)
     return success_response(message="Document deleted successfully")
+
+
+@router.get("/{project_id}/documents/{document_id}/download")
+async def download_project_document(
+    project_id: int,
+    document_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    service = ProjectService(db)
+    doc = await service.repository.get_document_by_id(document_id)
+    if not doc or doc.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    # If stored in Object Storage (Neon / AWS S3)
+    if not doc.file_path.startswith("/uploads") and not doc.file_path.startswith("http"):
+        from app.services.storage_service import storage_service
+        if storage_service.is_configured:
+            presigned_url = storage_service.generate_presigned_url(doc.file_path, expires_in=3600)
+            return RedirectResponse(url=presigned_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    # If local file
+    local_path = Path(doc.file_path.lstrip("/"))
+    if local_path.exists():
+        return FileResponse(path=local_path, filename=doc.file_name)
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File content not found on server")

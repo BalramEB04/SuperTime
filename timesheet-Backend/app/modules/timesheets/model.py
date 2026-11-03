@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -16,9 +16,9 @@ class Timesheet(Base):
     __tablename__ = "timesheets"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     project_assignment_id: Mapped[int] = mapped_column(
-        ForeignKey("project_assignments.id"), nullable=False
+        ForeignKey("project_assignments.id"), nullable=False, index=True
     )
     milestone_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("milestones.id", ondelete="SET NULL"), nullable=True, index=True
@@ -42,7 +42,14 @@ class Timesheet(Base):
     milestone: Mapped[Optional["Milestone"]] = relationship("Milestone")
 
     __table_args__ = (
-        UniqueConstraint("user_id", "project_assignment_id", "timesheet_date", name="uq_user_project_date"),
+        Index(
+            "uq_timesheet_user_proj_milestone_date",
+            "user_id",
+            "project_assignment_id",
+            text("COALESCE(milestone_id, 0)"),
+            "timesheet_date",
+            unique=True,
+        ),
     )
 
     @property

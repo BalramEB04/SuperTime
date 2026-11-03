@@ -1,6 +1,8 @@
 import { User, UserRole } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV );
 if (!API_BASE_URL) {
   throw new Error(
     '[api] VITE_API_BASE_URL is not set. ' +
@@ -92,6 +94,7 @@ export async function fetchCurrentUserApi(): Promise<User> {
   const response = await fetch(`${API_BASE_URL}/auth/me`, {
     method: 'GET',
     credentials: 'include',
+    headers: authHeader(),
   });
 
   const json = await response.json();
@@ -202,7 +205,12 @@ export interface UserUpdatePayload {
 }
 
 function authHeader() {
-  return { 'Content-Type': 'application/json' };
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = 'Bearer ' + token;
+  }
+  return headers;
 }
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -260,6 +268,15 @@ export async function toggleUserStatusApi(userId: number, status: 'Active' | 'In
     body: JSON.stringify({ status }),
   });
   return handleResponse<BackendUser>(res);
+}
+
+export async function deleteUserApi(userId: number): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/users/${userId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: authHeader(),
+  });
+  await handleResponse<any>(res);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,11 @@
+{
+  "name": "supertime-root",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "npm --prefix timesheet-Frontend run build"
+  },
+  "dependencies": {
+    "@neon/config": "^1.9.5",
+    "@neon/env": "^1.6.6"
+  }
+}

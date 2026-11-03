@@ -7,6 +7,7 @@ import {
   createUserApi,
   updateUserApi,
   toggleUserStatusApi,
+  deleteUserApi,
   fetchRolesApi,
   fetchDepartmentsApi,
   createDepartmentApi,
@@ -143,6 +144,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
 
   // ── Status-toggle loading set ─────────────────────────────────────────────
   const [togglingIds, setTogglingIds] = useState<Set<number>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
 
   // ── Fetch departments ────────────────────────────────────────────────────
   const loadDepartments = useCallback(async () => {
@@ -246,27 +248,59 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!createForm.first_name || !createForm.last_name || !createForm.email) {
-      onShowToast('Missing Fields', 'Please complete all required fields.', 'error');
+    const firstName = createForm.first_name.trim();
+    const lastName = createForm.last_name.trim();
+    const email = createForm.email.trim().toLowerCase();
+
+    if (!firstName || !lastName || !email) {
+      onShowToast('Missing Fields', 'Please fill in First Name, Last Name, and Email.', 'error');
       return;
     }
+
+    const nameRegex = /^[a-zA-Z\s'-]+$/;
+    if (firstName.length < 2 || !nameRegex.test(firstName)) {
+      onShowToast('Invalid First Name', 'Numbers and symbols are not allowed in names. Please enter letters only.', 'error');
+      return;
+    }
+    if (lastName.length < 1 || !nameRegex.test(lastName)) {
+      onShowToast('Invalid Last Name', 'Numbers and symbols are not allowed in names. Please enter letters only.', 'error');
+      return;
+    }
+
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(email)) {
+      onShowToast('Invalid Email', 'Please enter a valid corporate email address (e.g. name@company.com).', 'error');
+      return;
+    }
+
     if (!createForm.role_id) {
       onShowToast('Validation Error', 'Please select a system role.', 'error');
       return;
     }
+
+    if (!createForm.joining_date) {
+      onShowToast('Validation Error', 'Joining date is mandatory for onboarding.', 'error');
+      return;
+    }
+
+    if (createForm.ctc !== undefined && createForm.ctc < 0) {
+      onShowToast('Validation Error', 'CTC cannot be negative.', 'error');
+      return;
+    }
+
     setCreateLoading(true);
     try {
       await createUserApi({
-        email: createForm.email,
-        first_name: createForm.first_name,
-        last_name: createForm.last_name,
+        email: email,
+        first_name: firstName,
+        last_name: lastName,
         role_id: createForm.role_id,
         department_id: createForm.department_id ? Number(createForm.department_id) : null,
-        joining_date: createForm.joining_date || null,
-        status: createForm.status,
+        joining_date: createForm.joining_date,
+        status: 'Pending', // Enforce Pending status on onboarding
         ctc: createForm.ctc,
       });
-      onShowToast('Employee Created', `Account for ${createForm.first_name} ${createForm.last_name} created.`, 'success');
+      onShowToast('Employee Created', `Account for ${firstName} ${lastName} created with Pending status.`, 'success');
       setShowAddModal(false);
       setCreateForm({ ...defaultCreate });
       loadUsers();
@@ -322,6 +356,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
   };
 
   const handleToggleStatus = async (user: BackendUser) => {
+    if (user.id === currentUserId) {
+      onShowToast('Action Blocked', 'You cannot deactivate your own account.', 'error');
+      return;
+    }
     const newStatus = user.status === 'Active' ? 'Inactive' : 'Active';
     setTogglingIds((prev) => new Set(prev).add(user.id));
     try {
@@ -342,6 +380,46 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
       });
     }
   };
+
+  const handleDeleteUser = async (user: BackendUser) => {
+    if (user.role?.name?.toLowerCase().includes('admin') || user.role_id === 1) {
+      onShowToast('Action Blocked', 'Admin accounts cannot be deleted.', 'error');
+      return;
+    }
+    if (currentUserId === user.id) {
+      onShowToast('Action Blocked', 'You cannot delete your own account.', 'error');
+      return;
+    }
+    const confirmed = window.confirm(`Are you sure you want to permanently delete employee "${user.first_name} ${user.last_name}" (${user.email})? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    setDeletingIds((prev) => new Set(prev).add(user.id));
+    try {
+      await deleteUserApi(user.id);
+      onShowToast('Employee Deleted', `${user.first_name} ${user.last_name} was deleted successfully.`, 'success');
+      loadUsers();
+    } catch (e: any) {
+      onShowToast('Delete Failed', getErrorMessage(e, 'Failed to delete employee.'), 'error');
+    } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(user.id);
+        return next;
+      });
+    }
+  };
+
+  const handleSyncAndResetFilters = useCallback(() => {
+    setSearchQuery('');
+    setSelectedRoleId('');
+    setSelectedDeptId('');
+    setSelectedStatus('');
+    setCurrentPage(1);
+    loadUsers();
+    loadDepartments();
+    loadRoles();
+    onShowToast('Filters Reset', 'All user management filters have been reset and synced.', 'info');
+  }, [loadUsers, loadDepartments, loadRoles, onShowToast]);
 
   // ── Quick Department Creation Handler ──────────────────────────────────
   const handleCreateDepartmentSubmit = async (e: React.FormEvent) => {
@@ -504,15 +582,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
             <option value="Inactive">Inactive</option>
           </select>
 
-          {/* Refresh button */}
+          {/* Sync & Reset Filters button */}
           <button
             type="button"
-            onClick={() => { loadUsers(); loadDepartments(); }}
+            onClick={handleSyncAndResetFilters}
             disabled={loading}
-            className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 transition-colors disabled:opacity-50"
-            title="Refresh list"
+            className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer shadow-2xs active:scale-95"
+            title="Sync & reset all filters"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-600' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-blue-600' : ''}`} />
+            <span className="hidden sm:inline">Sync</span>
           </button>
         </div>
       </div>
@@ -632,13 +711,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                     {/* Actions */}
                     <td className="py-3.5 px-3 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        {/* Status toggle button */}
+                        {/* Status toggle button (Self protected from deactivation, other admins can be toggled) */}
                         {currentUserId !== user.id && (
                           <button
                             type="button"
                             onClick={() => handleToggleStatus(user)}
-                            disabled={togglingIds.has(user.id)}
-                            className="p-1.5 border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-all cursor-pointer"
+                            disabled={togglingIds.has(user.id) || deletingIds.has(user.id)}
+                            className="p-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-all cursor-pointer shadow-2xs"
                             title={user.status === 'Active' ? 'Deactivate User' : 'Activate User'}
                           >
                             {togglingIds.has(user.id) ? (
@@ -660,6 +739,23 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                         >
                           <Edit className="w-3.5 h-3.5" />
                         </button>
+
+                        {/* Delete User (Admins and Self protected from deletion) */}
+                        {currentUserId !== user.id && !user.role?.name?.toLowerCase().includes('admin') && user.role_id !== 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUser(user)}
+                            disabled={deletingIds.has(user.id) || togglingIds.has(user.id)}
+                            className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-600 transition-all cursor-pointer shadow-2xs"
+                            title="Delete Employee"
+                          >
+                            {deletingIds.has(user.id) ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -819,15 +915,24 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
 
                 <div className="space-y-1">
                   <label className={labelCls}>Status</label>
-                  <select
-                    value={editForm.status}
-                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                    className={inputCls}
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Inactive">Inactive</option>
-                  </select>
+                  {currentUserId === editingUser?.id ? (
+                    <div className="px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-slate-700 font-bold text-xs flex items-center justify-between">
+                      <span>Active (Self protected)</span>
+                      <ShieldCheck className="w-3.5 h-3.5 text-sky-600" />
+                    </div>
+                  ) : (
+                    <select
+                      value={editForm.status}
+                      onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                      className={inputCls}
+                    >
+                      <option value="Active">Active</option>
+                      {editingUser?.status === 'Pending' && (
+                        <option value="Pending">Pending</option>
+                      )}
+                      <option value="Inactive">Inactive</option>
+                    </select>
+                  )}
                 </div>
 
                 <div className="space-y-1">
@@ -1002,24 +1107,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
 
                 <div className="space-y-1">
                   <label className={labelCls}>Status</label>
-                  <select
-                    value={createForm.status}
-                    onChange={(e) => setCreateForm({ ...createForm, status: e.target.value })}
-                    className={inputCls}
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Inactive">Inactive</option>
-                  </select>
+                  <div className="flex items-center gap-2 px-3 py-2 bg-amber-50/80 border border-amber-200/90 rounded-xl text-amber-800 font-bold text-xs">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                    <span>Pending</span>
+                  </div>
                 </div>
 
                 <div className="space-y-1">
-                  <label className={labelCls}>Joining Date</label>
+                  <label className={labelCls}>Joining Date *</label>
                   <input
                     type="date"
                     value={createForm.joining_date}
                     onChange={(e) => setCreateForm({ ...createForm, joining_date: e.target.value })}
                     className={inputCls}
+                    required
                   />
                 </div>
               </div>
