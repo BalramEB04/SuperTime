@@ -49,6 +49,7 @@ interface SubmitTimesheetProps {
 }
 
 interface FormRow {
+  rowId: string;
   projectId: string;
   milestoneId: string;
   date: string;
@@ -57,6 +58,24 @@ interface FormRow {
   billableDescription: string;
   nonBillableDescription: string;
 }
+
+const generateRowId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `row-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+};
+
+const createEmptyRow = (dateStr: string, projectId: string = ''): FormRow => ({
+  rowId: generateRowId(),
+  projectId,
+  milestoneId: '',
+  date: dateStr,
+  billableHours: 0,
+  nonBillableHours: 0,
+  billableDescription: '',
+  nonBillableDescription: '',
+});
 
 const PROJECT_ICON_STYLES = [
   { icon: Calculator, bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-100' },
@@ -161,6 +180,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
   const [rows, setRows] = useState<FormRow[]>(() => {
     if (editingEntry) {
       return [{
+        rowId: generateRowId(),
         projectId: editingEntry.projectId,
         milestoneId: editingEntry.milestoneId ? String(editingEntry.milestoneId) : '',
         date: editingEntry.date,
@@ -172,62 +192,133 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
     }
     const initialDate = defaultDate || today;
     const resolvedInitialDate = employeeJoinDate && initialDate < employeeJoinDate ? employeeJoinDate : initialDate;
-    return [{
-      projectId: '',
-      milestoneId: '',
-      date: resolvedInitialDate,
-      billableHours: 0,
-      nonBillableHours: 0,
-      billableDescription: '',
-      nonBillableDescription: '',
-    }];
+    return [createEmptyRow(resolvedInitialDate)];
   });
 
-  const handleAddRow = () => {
-    setRows([
-      ...rows,
-      {
-        projectId: '',
-        milestoneId: '',
-        date: today,
-        billableHours: 0,
-        nonBillableHours: 0,
-        billableDescription: '',
-        nonBillableDescription: '',
-      },
-    ]);
+  // Guarantee every row has a stable unique rowId even if component was mounted before patch
+  useEffect(() => {
+    setRows((prev) => {
+      let needsFix = false;
+      const seenIds = new Set<string>();
+      const fixed = prev.map((r) => {
+        if (!r.rowId || seenIds.has(r.rowId)) {
+          needsFix = true;
+          return { ...r, rowId: generateRowId() };
+        }
+        seenIds.add(r.rowId);
+        return r;
+      });
+      return needsFix ? fixed : prev;
+    });
+  }, []);
+
+  const getProjectMilestonesStatus = (rowId: string, projectId: string, rowIndex?: number) => {
+    if (!projectId) return { availableCount: 0, options: [], hasConfigured: false };
+    const targetProj = projects.find((p) => String(p.id) === String(projectId));
+    if (!targetProj || !targetProj.milestones) return { availableCount: 0, options: [], hasConfigured: false };
+
+    // Milestone IDs selected in OTHER rows for this exact project
+    const otherSelectedMilestoneIds = new Set(
+      rows
+        .filter((r, idx) => {
+          const isSameRow = (r.rowId && rowId) ? r.rowId === rowId : (typeof rowIndex === 'number' && idx === rowIndex);
+          if (isSameRow) return false;
+          if (String(r.projectId) !== String(projectId)) return false;
+          return Boolean(r.milestoneId);
+        })
+        .map((r) => String(r.milestoneId))
+    );
+
+    const currentRow = rows.find((r, idx) => (r.rowId && rowId) ? r.rowId === rowId : (typeof rowIndex === 'number' && idx === rowIndex));
+    const currentMilestoneId = currentRow?.milestoneId ? String(currentRow.milestoneId) : '';
+
+    const options = targetProj.milestones
+      .map((m) => {
+        const mId = String(m.id);
+        const isOtherSelected = otherSelectedMilestoneIds.has(mId);
+        const isAchieved = m.status === 'achieved';
+        const isCurrent = mId === currentMilestoneId;
+
+        // Skip achieved milestones unless it is already the selected milestone of this row
+        if (isAchieved && !isCurrent) return null;
+
+        return {
+          id: m.id,
+          name: m.name,
+          status: m.status,
+          disabled: isOtherSelected,
+          label: `${m.name} (${m.status.replace('_', ' ')})${isOtherSelected ? ' — (Already Selected)' : ''}`,
+        };
+      })
+      .filter((opt): opt is NonNullable<typeof opt> => opt !== null);
+
+    const availableCount = options.filter((o) => !o.disabled).length;
+
+    return {
+      availableCount,
+      options,
+      hasConfigured: targetProj.milestones.length > 0,
+    };
   };
 
-  const handleRemoveRow = (index: number) => {
+  const handleAddRow = () => {
+    setRows((prev) => [...prev, createEmptyRow(today)]);
+  };
+
+  const handleRemoveRow = (rowId: string, rowIndex?: number) => {
     if (rows.length === 1) {
       onShowToast('Cannot remove', 'At least one task row is required.', 'error');
       return;
     }
-    setRows(rows.filter((_, i) => i !== index));
+    setRows((prev) =>
+      prev.filter((r, idx) => {
+        if (r.rowId && rowId) return r.rowId !== rowId;
+        return typeof rowIndex === 'number' ? idx !== rowIndex : true;
+      })
+    );
   };
 
   const handleRowChange = <K extends keyof FormRow>(
-    index: number,
+    rowId: string,
     field: K,
-    value: FormRow[K]
+    value: FormRow[K],
+    rowIndex?: number
   ) => {
-    const updated = [...rows];
-    updated[index][field] = value;
-    if (field === 'projectId') {
-      const targetProj = projects.find((p) => p.id === value);
-      const projMilestones = (targetProj?.milestones || []).filter((m) => m.status !== 'achieved');
-      updated[index].milestoneId = projMilestones.length === 1 ? String(projMilestones[0].id) : '';
+    // If setting a milestone, prevent choosing one already selected in another row for the same project
+    if (field === 'milestoneId' && value) {
+      const targetRow = rows.find((r, i) => (r.rowId && rowId) ? r.rowId === rowId : i === rowIndex);
+      const targetProjectId = targetRow?.projectId;
+      const isAlreadySelected = rows.some((r, i) => {
+        const isSame = (r.rowId && rowId) ? r.rowId === rowId : i === rowIndex;
+        if (isSame) return false;
+        return String(r.projectId) === String(targetProjectId) && String(r.milestoneId) === String(value);
+      });
+      if (isAlreadySelected) {
+        onShowToast('Milestone Already Selected', 'This milestone is already selected in another row for this project.', 'error');
+        return;
+      }
     }
-    setRows(updated);
+
+    setRows((prev) =>
+      prev.map((r, i) => {
+        const isMatch = (r.rowId && rowId) ? r.rowId === rowId : i === rowIndex;
+        if (!isMatch) return r;
+        const updated = { ...r, [field]: value };
+        if (field === 'projectId') {
+          updated.milestoneId = '';
+        }
+        return updated;
+      })
+    );
   };
 
   const handleHoursChange = (
-    index: number,
+    rowId: string,
     field: 'billableHours' | 'nonBillableHours',
     rawValue: string
   ) => {
     if (rawValue === '') {
-      handleRowChange(index, field, 0);
+      handleRowChange(rowId, field, 0);
       return;
     }
     let num = parseFloat(rawValue);
@@ -241,7 +332,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
         'warning'
       );
     }
-    handleRowChange(index, field, num);
+    handleRowChange(rowId, field, num);
   };
 
   const isNumberedList = (val: string) => {
@@ -250,12 +341,14 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
   };
 
   const toggleNumberFormat = (
-    rowIndex: number,
+    rowId: string,
     field: 'billableDescription' | 'nonBillableDescription'
   ) => {
-    const currentVal = rows[rowIndex][field];
+    const currentRow = rows.find((r) => r.rowId === rowId);
+    if (!currentRow) return;
+    const currentVal = currentRow[field];
     if (!currentVal.trim()) {
-      handleRowChange(rowIndex, field, '1. ');
+      handleRowChange(rowId, field, '1. ');
       return;
     }
     const lines = currentVal.split('\n');
@@ -268,17 +361,19 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
       itemIdx++;
       return isNumbered ? `• ${clean}` : `${itemIdx}. ${clean}`;
     });
-    handleRowChange(rowIndex, field, formatted.join('\n'));
+    handleRowChange(rowId, field, formatted.join('\n'));
   };
 
   const handleDescriptionFocus = (
     e: React.FocusEvent<HTMLTextAreaElement>,
-    rowIndex: number,
+    rowId: string,
     field: 'billableDescription' | 'nonBillableDescription'
   ) => {
-    const currentVal = rows[rowIndex][field];
+    const currentRow = rows.find((r) => r.rowId === rowId);
+    if (!currentRow) return;
+    const currentVal = currentRow[field];
     if (!currentVal || !currentVal.trim()) {
-      handleRowChange(rowIndex, field, '• ');
+      handleRowChange(rowId, field, '• ');
       const target = e.currentTarget;
       setTimeout(() => {
         target.selectionStart = target.selectionEnd = 2;
@@ -287,26 +382,30 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
   };
 
   const handleDescriptionBlur = (
-    rowIndex: number,
+    rowId: string,
     field: 'billableDescription' | 'nonBillableDescription'
   ) => {
-    const currentVal = rows[rowIndex][field];
+    const currentRow = rows.find((r) => r.rowId === rowId);
+    if (!currentRow) return;
+    const currentVal = currentRow[field];
     if (currentVal && !currentVal.replace(/^[•\s]+$/, '')) {
-      handleRowChange(rowIndex, field, '');
+      handleRowChange(rowId, field, '');
     }
   };
 
   const handleDescriptionChange = (
-    rowIndex: number,
+    rowId: string,
     field: 'billableDescription' | 'nonBillableDescription',
     newVal: string
   ) => {
-    const prevVal = rows[rowIndex][field];
+    const currentRow = rows.find((r) => r.rowId === rowId);
+    if (!currentRow) return;
+    const prevVal = currentRow[field];
     // If field was empty and user typed or pasted text without bullet/number prefix
     if (!prevVal && newVal.length > 0) {
       if (!newVal.startsWith('• ') && !/^\s*(\d+\.|-|\*)\s+/.test(newVal)) {
         if (newVal === '•' || newVal === '') {
-          handleRowChange(rowIndex, field, '');
+          handleRowChange(rowId, field, '');
           return;
         }
         const formatted = newVal
@@ -318,16 +417,16 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
             return `• ${trimmed}`;
           })
           .join('\n');
-        handleRowChange(rowIndex, field, formatted);
+        handleRowChange(rowId, field, formatted);
         return;
       }
     }
-    handleRowChange(rowIndex, field, newVal);
+    handleRowChange(rowId, field, newVal);
   };
 
   const handleDescriptionPaste = (
     e: React.ClipboardEvent<HTMLTextAreaElement>,
-    rowIndex: number,
+    rowId: string,
     field: 'billableDescription' | 'nonBillableDescription'
   ) => {
     const pasteText = e.clipboardData.getData('text');
@@ -335,7 +434,9 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
 
     const textarea = e.currentTarget;
     const { selectionStart, selectionEnd } = textarea;
-    const val = rows[rowIndex][field];
+    const currentRow = rows.find((r) => r.rowId === rowId);
+    if (!currentRow) return;
+    const val = currentRow[field];
 
     const lines = pasteText.split(/\r?\n/);
     const hasBulletsOrNumbers = lines.some((l) => /^\s*(•|-|\*|\d+\.)\s+/.test(l));
@@ -357,7 +458,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
       if (currentLine === '• ') {
         const lineStart = lastNewline + 1;
         const newText = val.substring(0, lineStart) + formattedPaste + afterCursor;
-        handleRowChange(rowIndex, field, newText);
+        handleRowChange(rowId, field, newText);
         setTimeout(() => {
           textarea.selectionStart = textarea.selectionEnd = lineStart + formattedPaste.length;
         }, 0);
@@ -365,7 +466,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
       }
 
       const newText = beforeCursor + formattedPaste + afterCursor;
-      handleRowChange(rowIndex, field, newText);
+      handleRowChange(rowId, field, newText);
       setTimeout(() => {
         textarea.selectionStart = textarea.selectionEnd = selectionStart + formattedPaste.length;
       }, 0);
@@ -374,12 +475,14 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
 
   const handleSummaryKeyDown = (
     e: React.KeyboardEvent<HTMLTextAreaElement>,
-    rowIndex: number,
+    rowId: string,
     field: 'billableDescription' | 'nonBillableDescription'
   ) => {
     const textarea = e.currentTarget;
     const { selectionStart, selectionEnd } = textarea;
-    const val = rows[rowIndex][field];
+    const currentRow = rows.find((r) => r.rowId === rowId);
+    if (!currentRow) return;
+    const val = currentRow[field];
 
     // Clean backspace when cursor is right after "• "
     if (e.key === 'Backspace' && selectionStart === selectionEnd) {
@@ -392,7 +495,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
         e.preventDefault();
         const lineStart = lastNewline + 1;
         const newText = val.substring(0, lineStart) + afterCursor;
-        handleRowChange(rowIndex, field, newText);
+        handleRowChange(rowId, field, newText);
         setTimeout(() => {
           textarea.selectionStart = textarea.selectionEnd = lineStart;
         }, 0);
@@ -416,7 +519,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
         if (!content) {
           const lineStart = lastNewline + 1;
           const newText = val.substring(0, lineStart) + afterCursor;
-          handleRowChange(rowIndex, field, newText);
+          handleRowChange(rowId, field, newText);
           setTimeout(() => {
             textarea.selectionStart = textarea.selectionEnd = lineStart;
           }, 0);
@@ -425,7 +528,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
 
         const insert = '\n• ';
         const newText = beforeCursor + insert + afterCursor;
-        handleRowChange(rowIndex, field, newText);
+        handleRowChange(rowId, field, newText);
         setTimeout(() => {
           textarea.selectionStart = textarea.selectionEnd = selectionStart + insert.length;
         }, 0);
@@ -443,7 +546,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
         if (!content) {
           const lineStart = lastNewline + 1;
           const newText = val.substring(0, lineStart) + afterCursor;
-          handleRowChange(rowIndex, field, newText);
+          handleRowChange(rowId, field, newText);
           setTimeout(() => {
             textarea.selectionStart = textarea.selectionEnd = lineStart;
           }, 0);
@@ -452,7 +555,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
 
         const insert = `\n${currentNum + 1}. `;
         const newText = beforeCursor + insert + afterCursor;
-        handleRowChange(rowIndex, field, newText);
+        handleRowChange(rowId, field, newText);
         setTimeout(() => {
           textarea.selectionStart = textarea.selectionEnd = selectionStart + insert.length;
         }, 0);
@@ -464,7 +567,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
         e.preventDefault();
         const insert = '\n• ';
         const newText = beforeCursor + insert + afterCursor;
-        handleRowChange(rowIndex, field, newText);
+        handleRowChange(rowId, field, newText);
         setTimeout(() => {
           textarea.selectionStart = textarea.selectionEnd = selectionStart + insert.length;
         }, 0);
@@ -527,6 +630,28 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
     if (grandTotal > 24.0) {
       onShowToast('Validation Error', 'Total daily hours (billable + non-billable) cannot exceed 24.0 hours.', 'error');
       return;
+    }
+
+    // Validate no duplicate (projectId, milestoneId, date) combinations across active rows
+    const seenCombos = new Set<string>();
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const totalHours = Number(row.billableHours || 0) + Number(row.nonBillableHours || 0);
+      if (totalHours === 0) continue;
+      if (!row.projectId) continue;
+
+      const comboKey = `${row.projectId}_${row.milestoneId || '0'}_${row.date}`;
+      if (seenCombos.has(comboKey)) {
+        const proj = projects.find((p) => String(p.id) === String(row.projectId));
+        const milestone = proj?.milestones?.find((m) => String(m.id) === String(row.milestoneId));
+        onShowToast(
+          'Duplicate Entry',
+          `You have multiple entries for Project "${proj?.name || row.projectId}" ${milestone ? `and Milestone "${milestone.name}"` : ''} on ${row.date}. Please combine the hours into a single row.`,
+          'error'
+        );
+        return;
+      }
+      seenCombos.add(comboKey);
     }
 
     const isBeforeJoining = Boolean(employeeJoinDate && rows.some((r) => r.date < employeeJoinDate));
@@ -725,17 +850,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
         'success'
       );
       // Reset form after successful submit
-      setRows([
-        {
-          projectId: assignedProjects[0]?.id || '',
-          milestoneId: '',
-          date: defaultDate || today,
-          billableHours: 0,
-          nonBillableHours: 0,
-          billableDescription: '',
-          nonBillableDescription: '',
-        },
-      ]);
+      setRows([createEmptyRow(defaultDate || today, assignedProjects[0]?.id || '')]);
     } catch (e: any) {
       const msg = e?.data?.detail || e?.data?.message || 'Failed to submit timesheets';
       onShowToast('Error', msg, 'error');
@@ -951,7 +1066,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
           <div className={isSingleRow ? 'flex-1 min-h-0 flex flex-col space-y-2.5' : 'space-y-3'}>
             {rows.map((row, idx) => (
               <div
-                key={idx}
+                key={row.rowId}
                 className={`p-3 sm:p-3.5 rounded-xl bg-slate-50/90 border border-slate-200/90 transition-all hover:border-slate-300 ${isSingleRow ? 'flex-1 min-h-0 flex flex-col space-y-2.5' : 'space-y-3 shadow-2xs'}`}
               >
                 {/* Project, Milestone, Date Selection Grid */}
@@ -964,7 +1079,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                     </label>
                     <select
                       value={row.projectId}
-                      onChange={(e) => handleRowChange(idx, 'projectId', e.target.value)}
+                      onChange={(e) => handleRowChange(row.rowId, 'projectId', e.target.value)}
                       disabled={!!editingEntry}
                       required
                       className="w-full h-8.5 bg-slate-100/80 hover:bg-white focus:bg-white border border-slate-300 text-slate-900 font-bold rounded-lg px-2.5 text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none disabled:opacity-60 cursor-pointer shadow-2xs transition-colors"
@@ -981,31 +1096,35 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                   {/* Milestone Selection */}
                   <div className="md:col-span-4 lg:col-span-4 space-y-1">
                     {(() => {
-                      const targetProj = projects.find((p) => p.id === row.projectId);
-                      const allMilestones = targetProj?.milestones || [];
-                      const activeMilestones = allMilestones.filter(
-                        (m) => m.status !== 'achieved' || String(m.id) === String(row.milestoneId)
+                      const { availableCount, options: milestoneOptions, hasConfigured } = getProjectMilestonesStatus(
+                        row.rowId,
+                        row.projectId,
+                        idx
                       );
-                      const hasActive = activeMilestones.length > 0;
+                      const hasActive = availableCount > 0;
                       return (
                         <>
                           <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between h-3.5">
                             <span className="flex items-center gap-1.5">
                               <Layers className="w-3 h-3 text-primary" />
                               <span>Milestone</span>
-                              {hasActive && <span className="text-rose-500 font-bold">*</span>}
+                              {hasConfigured && <span className="text-rose-500 font-bold">*</span>}
                             </span>
-                            {hasActive && (
-                              <span className="text-[8.5px] text-primary font-semibold bg-primary-subtle px-1.5 py-0.2 rounded border border-primary-subtle-border">
-                                {activeMilestones.length} Available
+                            {hasConfigured && (
+                              <span className={`text-[8.5px] font-semibold px-1.5 py-0.2 rounded border ${
+                                availableCount > 0
+                                  ? 'text-primary bg-primary-subtle border-primary-subtle-border'
+                                  : 'text-amber-700 bg-amber-50 border-amber-200'
+                              }`}>
+                                {availableCount} Available
                               </span>
                             )}
                           </label>
                           <select
                             value={row.milestoneId || ''}
-                            onChange={(e) => handleRowChange(idx, 'milestoneId', e.target.value)}
+                            onChange={(e) => handleRowChange(row.rowId, 'milestoneId', e.target.value, idx)}
                             disabled={!!editingEntry || !row.projectId}
-                            required={hasActive}
+                            required={hasConfigured}
                             className="w-full h-8.5 bg-slate-100/80 hover:bg-white focus:bg-white border border-slate-300 text-slate-900 font-medium rounded-lg px-2.5 text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none disabled:opacity-60 cursor-pointer truncate shadow-2xs transition-colors"
                           >
                             <option value="">
@@ -1013,13 +1132,18 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                                 ? 'Select a Project first'
                                 : hasActive
                                   ? '-- Select Milestone --'
-                                  : allMilestones.length > 0
-                                    ? 'All Milestones Achieved'
+                                  : hasConfigured
+                                    ? 'All Milestones Achieved or Selected'
                                     : 'No Milestones Configured'}
                             </option>
-                            {activeMilestones.map((m) => (
-                              <option key={m.id} value={m.id}>
-                                {m.name} ({m.status.replace('_', ' ')})
+                            {milestoneOptions.map((opt) => (
+                              <option
+                                key={opt.id}
+                                value={opt.id}
+                                disabled={opt.disabled}
+                                className={opt.disabled ? 'text-slate-400 bg-slate-100 italic' : ''}
+                              >
+                                {opt.label}
                               </option>
                             ))}
                           </select>
@@ -1044,7 +1168,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                       value={row.date}
                       min={effectiveMinAllowedDate}
                       max={today}
-                      onChange={(e) => handleRowChange(idx, 'date', e.target.value)}
+                      onChange={(e) => handleRowChange(row.rowId, 'date', e.target.value)}
                       disabled={!!editingEntry}
                       className="w-full h-8.5 bg-slate-100/80 hover:bg-white focus:bg-white border border-slate-300 text-slate-900 font-bold rounded-lg px-2.5 text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none disabled:opacity-60 cursor-pointer shadow-2xs transition-colors"
                     />
@@ -1055,7 +1179,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                     <div className="h-3.5" />
                     <button
                       type="button"
-                      onClick={() => handleRemoveRow(idx)}
+                      onClick={() => handleRemoveRow(row.rowId)}
                       disabled={rows.length === 1}
                       className="h-8.5 w-8.5 flex items-center justify-center rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 transition-colors border border-rose-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed shadow-2xs"
                       title="Remove Task Row"
@@ -1093,8 +1217,8 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                           max="24"
                           placeholder="0.0"
                           value={row.billableHours === 0 ? '' : row.billableHours}
-                          onChange={(e) => handleHoursChange(idx, 'billableHours', e.target.value)}
-                          className="w-16 h-6.5 text-center bg-emerald-50/80 hover:bg-white focus:bg-white border border-emerald-300 text-emerald-950 font-black rounded text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-2xs transition-colors"
+                          onChange={(e) => handleHoursChange(row.rowId, 'billableHours', e.target.value)}
+                          className="w-16 h-6.5 text-center bg-emerald-50/80 hover:bg-white focus:bg-white border border-slate-300 text-emerald-950 font-black rounded text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-2xs transition-colors"
                         />
                         <span className="text-[10px] font-extrabold text-emerald-800">hrs</span>
                       </div>
@@ -1109,7 +1233,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                         </label>
                         <button
                           type="button"
-                          onClick={() => toggleNumberFormat(idx, 'billableDescription')}
+                          onClick={() => toggleNumberFormat(row.rowId, 'billableDescription')}
                           className={`px-2 py-0.5 text-[9.5px] font-bold rounded border transition-colors cursor-pointer flex items-center gap-1 shadow-2xs ${isNumberedList(row.billableDescription)
                               ? 'bg-emerald-100 border-emerald-300 text-emerald-800'
                               : 'bg-white hover:bg-emerald-50 border-emerald-200 text-emerald-800'
@@ -1123,11 +1247,11 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
 
                       <textarea
                         value={row.billableDescription}
-                        onFocus={(e) => handleDescriptionFocus(e, idx, 'billableDescription')}
-                        onBlur={() => handleDescriptionBlur(idx, 'billableDescription')}
-                        onChange={(e) => handleDescriptionChange(idx, 'billableDescription', e.target.value)}
-                        onKeyDown={(e) => handleSummaryKeyDown(e, idx, 'billableDescription')}
-                        onPaste={(e) => handleDescriptionPaste(e, idx, 'billableDescription')}
+                        onFocus={(e) => handleDescriptionFocus(e, row.rowId, 'billableDescription')}
+                        onBlur={() => handleDescriptionBlur(row.rowId, 'billableDescription')}
+                        onChange={(e) => handleDescriptionChange(row.rowId, 'billableDescription', e.target.value)}
+                        onKeyDown={(e) => handleSummaryKeyDown(e, row.rowId, 'billableDescription')}
+                        onPaste={(e) => handleDescriptionPaste(e, row.rowId, 'billableDescription')}
                         placeholder="• Built and deployed user auth API&#10;• Configured milestone endpoints&#10;• Unit tests in pytest"
                         className={`w-full bg-white/95 border border-emerald-200/90 rounded-lg px-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none resize-none leading-relaxed font-mono shadow-2xs transition-colors ${isSingleRow ? 'flex-1 min-h-[140px]' : 'h-[120px]'}`}
                       />
@@ -1160,7 +1284,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                           max="24"
                           placeholder="0.0"
                           value={row.nonBillableHours === 0 ? '' : row.nonBillableHours}
-                          onChange={(e) => handleHoursChange(idx, 'nonBillableHours', e.target.value)}
+                          onChange={(e) => handleHoursChange(row.rowId, 'nonBillableHours', e.target.value)}
                           className="w-16 h-6.5 text-center bg-slate-100 hover:bg-white focus:bg-white border border-slate-300 text-slate-900 font-black rounded text-xs focus:ring-2 focus:ring-slate-400 focus:outline-none shadow-2xs transition-colors"
                         />
                         <span className="text-[10px] font-extrabold text-slate-700">hrs</span>
@@ -1175,7 +1299,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                         </label>
                         <button
                           type="button"
-                          onClick={() => toggleNumberFormat(idx, 'nonBillableDescription')}
+                          onClick={() => toggleNumberFormat(row.rowId, 'nonBillableDescription')}
                           className={`px-2 py-0.5 text-[9.5px] font-bold rounded border transition-colors cursor-pointer flex items-center gap-1 shadow-2xs ${isNumberedList(row.nonBillableDescription)
                               ? 'bg-slate-200 border-slate-300 text-slate-800'
                               : 'bg-white hover:bg-slate-100 border-slate-200 text-slate-700'
@@ -1189,11 +1313,11 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
 
                       <textarea
                         value={row.nonBillableDescription}
-                        onFocus={(e) => handleDescriptionFocus(e, idx, 'nonBillableDescription')}
-                        onBlur={() => handleDescriptionBlur(idx, 'nonBillableDescription')}
-                        onChange={(e) => handleDescriptionChange(idx, 'nonBillableDescription', e.target.value)}
-                        onKeyDown={(e) => handleSummaryKeyDown(e, idx, 'nonBillableDescription')}
-                        onPaste={(e) => handleDescriptionPaste(e, idx, 'nonBillableDescription')}
+                        onFocus={(e) => handleDescriptionFocus(e, row.rowId, 'nonBillableDescription')}
+                        onBlur={() => handleDescriptionBlur(row.rowId, 'nonBillableDescription')}
+                        onChange={(e) => handleDescriptionChange(row.rowId, 'nonBillableDescription', e.target.value)}
+                        onKeyDown={(e) => handleSummaryKeyDown(e, row.rowId, 'nonBillableDescription')}
+                        onPaste={(e) => handleDescriptionPaste(e, row.rowId, 'nonBillableDescription')}
                         placeholder="• Daily team sync and PM review&#10;• Environment setup and dependency resolution"
                         className={`w-full bg-white/95 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-400 focus:border-slate-400 focus:outline-none resize-none leading-relaxed font-mono shadow-2xs transition-colors ${isSingleRow ? 'flex-1 min-h-[140px]' : 'h-[120px]'}`}
                       />
