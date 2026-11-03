@@ -356,8 +356,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
   };
 
   const handleToggleStatus = async (user: BackendUser) => {
-    if (user.role?.name?.toLowerCase().includes('admin') || user.role_id === 1) {
-      onShowToast('Action Blocked', 'Admin accounts cannot be deactivated.', 'error');
+    if (user.id === currentUserId) {
+      onShowToast('Action Blocked', 'You cannot deactivate your own account.', 'error');
       return;
     }
     const newStatus = user.status === 'Active' ? 'Inactive' : 'Active';
@@ -711,8 +711,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                     {/* Actions */}
                     <td className="py-3.5 px-3 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        {/* Status toggle button (Admin protected from deactivation) */}
-                        {currentUserId !== user.id && !user.role?.name?.toLowerCase().includes('admin') && user.role_id !== 1 && (
+                        {/* Status toggle button (Self protected from deactivation, other admins can be toggled) */}
+                        {currentUserId !== user.id && (
                           <button
                             type="button"
                             onClick={() => handleToggleStatus(user)}
@@ -915,9 +915,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
 
                 <div className="space-y-1">
                   <label className={labelCls}>Status</label>
-                  {editingUser?.role?.name?.toLowerCase().includes('admin') || editingUser?.role_id === 1 ? (
+                  {currentUserId === editingUser?.id ? (
                     <div className="px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-slate-700 font-bold text-xs flex items-center justify-between">
-                      <span>Active (Admin protected)</span>
+                      <span>Active (Self protected)</span>
                       <ShieldCheck className="w-3.5 h-3.5 text-sky-600" />
                     </div>
                   ) : (
@@ -927,7 +927,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                       className={inputCls}
                     >
                       <option value="Active">Active</option>
-                      <option value="Pending">Pending</option>
+                      {editingUser?.status === 'Pending' && (
+                        <option value="Pending">Pending</option>
+                      )}
                       <option value="Inactive">Inactive</option>
                     </select>
                   )}
