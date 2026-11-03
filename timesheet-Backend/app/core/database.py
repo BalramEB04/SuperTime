@@ -1,19 +1,32 @@
 from typing import AsyncGenerator
+import os
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
+is_serverless = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+
+# Critical for Supabase and Neon connection poolers (PgBouncer in transaction mode):
+# asyncpg's statement cache MUST be set to 0. Otherwise subsequent queries
+# routed across PgBouncer pool connections will fail intermittently with:
+# 'prepared statement __asyncpg_stmt_X__ does not exist' (causing random 500 errors).
+connect_args = {
+    "statement_cache_size": 0,
+    "prepared_statement_cache_size": 0,
+}
+
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
     future=True,
-    pool_size=10,
-    max_overflow=20,
-    pool_recycle=300,        # Recycle connections every 5 min (prevents Neon serverless pooler timeouts)
+    pool_size=5 if not is_serverless else 2,
+    max_overflow=10 if not is_serverless else 5,
+    pool_recycle=300,        # Recycle connections every 5 min
     pool_pre_ping=True,       # Detect disconnected connections before using them
     pool_timeout=30,
+    connect_args=connect_args,
 )
 
 AsyncSessionLocal = async_sessionmaker(
