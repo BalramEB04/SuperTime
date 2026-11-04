@@ -36,6 +36,7 @@ import {
   Building2,
   Trash2,
   Settings,
+  Info,
 } from 'lucide-react';
 
 interface UserManagementProps {
@@ -1054,22 +1055,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className={labelCls}>CTC (Annual in ₹)</label>
-                  <input
-                    type="number"
-                    value={createForm.ctc !== undefined ? createForm.ctc : ''}
-                    onChange={(e) => setCreateForm({ ...createForm, ctc: e.target.value ? Number(e.target.value) : undefined })}
-                    className={inputCls}
-                    placeholder="E.g., 500000"
-                  />
-                </div>
-                <div className="space-y-1 flex flex-col justify-end">
-                  <div className="text-[10px] text-slate-500 pb-2">
-                    Employee ID is auto-generated (e.g. EMP-1)
-                  </div>
-                </div>
+              <div className="text-xs text-slate-500 bg-slate-50/80 border border-slate-200/80 rounded-xl px-3.5 py-2.5 flex items-center gap-2">
+                <Info className="w-4 h-4 text-slate-400 shrink-0" />
+                <span>Employee ID will be auto-generated upon creation (e.g. EMP-1).</span>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
