@@ -16,18 +16,23 @@ is_serverless = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNC
 connect_args = {
     "statement_cache_size": 0,
     "prepared_statement_cache_size": 0,
+    "command_timeout": 30,
+    "server_settings": {
+        "application_name": "supertime_serverless" if is_serverless else "supertime_local",
+    },
 }
 
 # In serverless environments (Vercel / Lambda), use NullPool so that connections
 # are closed immediately after each request instead of lingering open and hitting
 # Supabase's max connection limits (EMAXCONNSESSION).
+# Note: pool_pre_ping is omitted under NullPool to avoid an extra SELECT 1 round-trip
+# on every fresh connection handshake.
 if is_serverless:
     engine = create_async_engine(
         settings.DATABASE_URL,
         echo=False,
         future=True,
         poolclass=NullPool,
-        pool_pre_ping=True,
         connect_args=connect_args,
     )
 else:
