@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import smtplib
 from pathlib import Path
@@ -58,10 +59,13 @@ async def send_email(
         if body_html:
             msg.attach(MIMEText(body_html, "html"))
 
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, [to_email], msg.as_string())
+        def _sync_send():
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=8) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_password)
+                server.sendmail(smtp_user, [to_email], msg.as_string())
+
+        await asyncio.to_thread(_sync_send)
 
         logger.info(f"Successfully sent email to {to_email}")
         return True

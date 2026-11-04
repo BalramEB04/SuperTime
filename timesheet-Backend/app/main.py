@@ -24,13 +24,13 @@ logger = logging.getLogger("app.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Pre-warm connection pool on startup
-    try:
-        await ping_database_keepalive()
-    except Exception as e:
-        logger.warning(f"Initial DB keepalive warm-up failed: {e}")
     is_serverless = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
     if not is_serverless:
+        # Pre-warm connection pool on startup for persistent servers
+        try:
+            await ping_database_keepalive()
+        except Exception as e:
+            logger.warning(f"Initial DB keepalive warm-up failed: {e}")
         start_scheduler()
     yield
     if not is_serverless:

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date, timedelta
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -164,15 +165,18 @@ class LeaveRequestService:
             user_full_name = f"{updated_request.user.first_name} {updated_request.user.last_name}".strip()
             approver_full_name = f"{admin_user.first_name} {admin_user.last_name}".strip()
             leave_type_name = updated_request.leave_type.name if updated_request.leave_type else "Leave"
-            await send_leave_approved_email(
-                to_email=updated_request.user.email,
-                user_name=user_full_name,
-                leave_type=leave_type_name,
-                start_date=str(updated_request.start_date),
-                end_date=str(updated_request.end_date),
-                working_days=working_days,
-                approver_name=approver_full_name,
-            )
+            try:
+                asyncio.create_task(send_leave_approved_email(
+                    to_email=updated_request.user.email,
+                    user_name=user_full_name,
+                    leave_type=leave_type_name,
+                    start_date=str(updated_request.start_date),
+                    end_date=str(updated_request.end_date),
+                    working_days=working_days,
+                    approver_name=approver_full_name,
+                ))
+            except Exception:
+                pass
 
         return updated_request
 
@@ -205,15 +209,18 @@ class LeaveRequestService:
             user_full_name = f"{updated_request.user.first_name} {updated_request.user.last_name}".strip()
             reviewer_full_name = f"{admin_user.first_name} {admin_user.last_name}".strip()
             leave_type_name = updated_request.leave_type.name if updated_request.leave_type else "Leave"
-            await send_leave_rejected_email(
-                to_email=updated_request.user.email,
-                user_name=user_full_name,
-                leave_type=leave_type_name,
-                start_date=str(updated_request.start_date),
-                end_date=str(updated_request.end_date),
-                rejection_reason=review_in.rejection_reason,
-                reviewer_name=reviewer_full_name,
-            )
+            try:
+                asyncio.create_task(send_leave_rejected_email(
+                    to_email=updated_request.user.email,
+                    user_name=user_full_name,
+                    leave_type=leave_type_name,
+                    start_date=str(updated_request.start_date),
+                    end_date=str(updated_request.end_date),
+                    rejection_reason=review_in.rejection_reason,
+                    reviewer_name=reviewer_full_name,
+                ))
+            except Exception:
+                pass
 
         return updated_request
 

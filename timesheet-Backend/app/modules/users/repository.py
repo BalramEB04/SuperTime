@@ -1,7 +1,7 @@
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 from app.modules.users.model import User
 
@@ -21,7 +21,7 @@ class UserRepository:
     async def get_by_id(db: AsyncSession, user_id: int) -> Optional[User]:
         result = await db.execute(
             select(User)
-            .options(selectinload(User.role), selectinload(User.department))
+            .options(joinedload(User.role), joinedload(User.department))
             .filter(User.id == user_id)
         )
         return result.scalar_one_or_none()
@@ -30,7 +30,7 @@ class UserRepository:
     async def get_by_email(db: AsyncSession, email: str) -> Optional[User]:
         result = await db.execute(
             select(User)
-            .options(selectinload(User.role), selectinload(User.department))
+            .options(joinedload(User.role), joinedload(User.department))
             .filter(User.email == email)
         )
         return result.scalar_one_or_none()
@@ -39,7 +39,7 @@ class UserRepository:
     async def get_by_employee_id(db: AsyncSession, employee_id: str) -> Optional[User]:
         result = await db.execute(
             select(User)
-            .options(selectinload(User.role), selectinload(User.department))
+            .options(joinedload(User.role), joinedload(User.department))
             .filter(User.employee_id == employee_id)
         )
         return result.scalar_one_or_none()
@@ -53,7 +53,7 @@ class UserRepository:
         status: Optional[str] = None,
         search: Optional[str] = None,
     ) -> Tuple[List[User], int]:
-        query = select(User).options(selectinload(User.role), selectinload(User.department))
+        query = select(User).options(joinedload(User.role), joinedload(User.department))
         count_query = select(func.count(User.id))
 
         if role_id is not None:

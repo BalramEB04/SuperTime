@@ -78,8 +78,7 @@ class DashboardService:
         sick_used = 0.0
         
         for bal in balances:
-            res = await db.execute(select(LeaveType).where(LeaveType.id == bal.leave_type_id))
-            lt = res.scalar_one_or_none()
+            lt = bal.leave_type
             if lt:
                 name_lower = lt.name.lower()
                 if 'annual' in name_lower or 'earned' in name_lower or 'privilege' in name_lower or 'pl' in name_lower:
@@ -104,9 +103,7 @@ class DashboardService:
         )
         recent_leaves = []
         for req in requests:
-            res = await db.execute(select(LeaveType).where(LeaveType.id == req.leave_type_id))
-            lt = res.scalar_one_or_none()
-            type_name = lt.name if lt else "Leave"
+            type_name = req.leave_type.name if req.leave_type else "Leave"
             
             recent_leaves.append(
                 RecentLeaveRequestWidget(

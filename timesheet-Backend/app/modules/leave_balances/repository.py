@@ -1,5 +1,6 @@
 from typing import List, Optional
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.leave_balances.model import LeaveBalance
@@ -12,6 +13,7 @@ class LeaveBalanceRepository:
     ) -> List[LeaveBalance]:
         query = (
             select(LeaveBalance)
+            .options(joinedload(LeaveBalance.leave_type))
             .where(LeaveBalance.user_id == user_id, LeaveBalance.year == year)
             .order_by(LeaveBalance.leave_type_id.asc())
         )

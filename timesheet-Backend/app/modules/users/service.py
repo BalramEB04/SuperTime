@@ -1,3 +1,4 @@
+import asyncio
 from typing import List, Optional, Tuple
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,16 +65,19 @@ class UserService:
 
         created_user = await UserRepository.create(db, new_user)
 
-        # Dispatch Welcome Email Notification
+        # Dispatch Welcome Email Notification asynchronously in background so POST returns instantly
         if created_user.email:
             user_full_name = f"{created_user.first_name} {created_user.last_name}".strip()
             role_name = role.name if role else "Employee"
-            await send_welcome_email(
-                to_email=created_user.email,
-                user_name=user_full_name,
-                role_name=role_name,
-                employee_id=created_user.employee_id,
-            )
+            try:
+                asyncio.create_task(send_welcome_email(
+                    to_email=created_user.email,
+                    user_name=user_full_name,
+                    role_name=role_name,
+                    employee_id=created_user.employee_id,
+                ))
+            except Exception:
+                pass
 
         return created_user
 
