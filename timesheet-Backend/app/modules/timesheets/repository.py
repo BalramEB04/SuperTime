@@ -25,8 +25,6 @@ class TimesheetRepository:
     ) -> List[Timesheet]:
         db.add_all(timesheets)
         await db.commit()
-        for ts in timesheets:
-            await db.refresh(ts)
         ids = [ts.id for ts in timesheets]
         result = await db.execute(
             select(Timesheet)

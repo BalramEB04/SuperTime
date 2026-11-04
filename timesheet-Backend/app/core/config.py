@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 
 
-def _clean_asyncpg_url(v: str | None) -> str:
+def _clean_asyncpg_url(v: str | None, upgrade_to_transaction_mode: bool = True) -> str:
     if not v or not isinstance(v, str):
         return "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/timesheet_db"
     
@@ -16,7 +16,7 @@ def _clean_asyncpg_url(v: str | None) -> str:
 
     # Supabase Pooler: automatically upgrade session mode (port 5432, max 15 clients)
     # to transaction mode (port 6543) which supports high concurrency in serverless
-    if "pooler.supabase.com:5432" in url:
+    if upgrade_to_transaction_mode and "pooler.supabase.com:5432" in url:
         url = url.replace("pooler.supabase.com:5432", "pooler.supabase.com:6543")
 
     parsed = urllib.parse.urlsplit(url)
@@ -59,7 +59,7 @@ class Settings(BaseSettings):
         import os
         val = os.getenv("DATABASE_URL_UNPOOLED", v)
         if val:
-            return _clean_asyncpg_url(val)
+            return _clean_asyncpg_url(val, upgrade_to_transaction_mode=False)
         return None
 
     SECRET_KEY: str = "super_secret_key_change_me_in_production"

@@ -54,6 +54,11 @@ raw_migration_url = (
 )
 migration_url = clean_db_url(raw_migration_url)
 
+# Migrations require Session mode or Direct connection. If given Transaction pooler (6543),
+# safely fallback to Session mode (5432) so DDL statements and locks execute reliably.
+if "pooler.supabase.com:6543" in migration_url:
+    migration_url = migration_url.replace("pooler.supabase.com:6543", "pooler.supabase.com:5432")
+
 config.set_main_option("sqlalchemy.url", migration_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
@@ -92,6 +97,7 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args={"statement_cache_size": 0},
     )
 
     async with connectable.connect() as connection:
