@@ -3,6 +3,7 @@ import os
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
@@ -17,17 +18,30 @@ connect_args = {
     "prepared_statement_cache_size": 0,
 }
 
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    future=True,
-    pool_size=5 if not is_serverless else 2,
-    max_overflow=10 if not is_serverless else 5,
-    pool_recycle=300,        # Recycle connections every 5 min
-    pool_pre_ping=True,       # Detect disconnected connections before using them
-    pool_timeout=30,
-    connect_args=connect_args,
-)
+# In serverless environments (Vercel / Lambda), use NullPool so that connections
+# are closed immediately after each request instead of lingering open and hitting
+# Supabase's max connection limits (EMAXCONNSESSION).
+if is_serverless:
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=False,
+        future=True,
+        poolclass=NullPool,
+        pool_pre_ping=True,
+        connect_args=connect_args,
+    )
+else:
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=False,
+        future=True,
+        pool_size=5,
+        max_overflow=10,
+        pool_recycle=300,        # Recycle connections every 5 min
+        pool_pre_ping=True,       # Detect disconnected connections before using them
+        pool_timeout=30,
+        connect_args=connect_args,
+    )
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

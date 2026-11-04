@@ -14,6 +14,11 @@ def _clean_asyncpg_url(v: str | None) -> str:
     elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
+    # Supabase Pooler: automatically upgrade session mode (port 5432, max 15 clients)
+    # to transaction mode (port 6543) which supports high concurrency in serverless
+    if "pooler.supabase.com:5432" in url:
+        url = url.replace("pooler.supabase.com:5432", "pooler.supabase.com:6543")
+
     parsed = urllib.parse.urlsplit(url)
     query_params = urllib.parse.parse_qs(parsed.query)
 
