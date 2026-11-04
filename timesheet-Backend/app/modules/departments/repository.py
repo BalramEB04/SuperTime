@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.departments.model import Department
+from app.modules.departments.designation_model import Designation
 from app.modules.departments.schema import DepartmentCreate, DepartmentUpdate
 from app.modules.users.model import User
 
@@ -66,3 +67,19 @@ class DepartmentRepository:
     async def delete(self, dept: Department) -> None:
         await self.db.delete(dept)
         await self.db.commit()
+
+    async def get_designations_by_department(self, dept_id: int, active_only: bool = True) -> List[Designation]:
+        query = select(Designation).where(Designation.department_id == dept_id)
+        if active_only:
+            query = query.where(Designation.is_active == True)  # noqa: E712
+        query = query.order_by(Designation.name.asc())
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def get_all_designations(self, active_only: bool = True) -> List[Designation]:
+        query = select(Designation)
+        if active_only:
+            query = query.where(Designation.is_active == True)  # noqa: E712
+        query = query.order_by(Designation.name.asc())
+        result = await self.db.execute(query)
+        return list(result.scalars().all())

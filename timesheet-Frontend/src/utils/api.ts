@@ -155,6 +155,15 @@ export interface BackendDepartment {
   updated_at?: string;
 }
 
+export interface BackendDesignation {
+  id: number;
+  department_id: number;
+  name: string;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface BackendUser {
   id: number;
   department_id?: number | null;
@@ -164,6 +173,7 @@ export interface BackendUser {
   last_name: string;
   employee_id: string;
   role_id: number;
+  designation?: string;
   joining_date: string | null;
   status: string;
   ctc?: number;
@@ -187,6 +197,7 @@ export interface UserCreatePayload {
   last_name: string;
   employee_id?: string;
   role_id: number;
+  designation: string;
   joining_date?: string | null;
   status?: string;
   ctc?: number;
@@ -199,6 +210,7 @@ export interface UserUpdatePayload {
   last_name?: string;
   employee_id?: string;
   role_id?: number;
+  designation?: string;
   joining_date?: string | null;
   status?: string;
   ctc?: number;
@@ -344,4 +356,20 @@ export async function deleteDepartmentApi(deptId: number): Promise<void> {
     headers: authHeader(),
   });
   await handleResponse<any>(res);
+}
+
+export async function fetchDesignationsByDeptApi(departmentId: number, activeOnly: boolean = true): Promise<BackendDesignation[]> {
+  const res = await fetch(`${API_BASE_URL}/departments/${departmentId}/designations?active_only=${activeOnly}`, {
+    credentials: 'include',
+    headers: authHeader(),
+  });
+  return handleResponse<BackendDesignation[]>(res);
+}
+
+export async function fetchAllDesignationsApi(activeOnly: boolean = true): Promise<BackendDesignation[]> {
+  const res = await fetch(`${API_BASE_URL}/departments/designations/all?active_only=${activeOnly}`, {
+    credentials: 'include',
+    headers: authHeader(),
+  });
+  return handleResponse<BackendDesignation[]>(res);
 }

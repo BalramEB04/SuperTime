@@ -1,9 +1,13 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 from sqlalchemy import Boolean, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.modules.departments.designation_model import Designation
+    from app.modules.users.model import User
 
 
 class Department(Base):
@@ -22,3 +26,6 @@ class Department(Base):
     )
 
     users: Mapped[List["User"]] = relationship("User", back_populates="department")
+    designations: Mapped[List["Designation"]] = relationship(
+        "Designation", back_populates="department", cascade="all, delete-orphan"
+    )

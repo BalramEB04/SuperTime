@@ -15,6 +15,8 @@ import {
   BackendUser,
   BackendRole,
   BackendDepartment,
+  BackendDesignation,
+  fetchAllDesignationsApi,
 } from '../../utils/api';
 import {
   UserCog,
@@ -82,6 +84,7 @@ const defaultCreate = {
   email: '',
   role_id: 0,
   department_id: '' as number | '',
+  designation: '',
   joining_date: '',
   status: 'Pending',
   ctc: undefined as number | undefined,
@@ -99,6 +102,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
 
   const [departments, setDepartments] = useState<BackendDepartment[]>([]);
   const [deptLoading, setDeptLoading] = useState(false);
+  const [allDesignations, setAllDesignations] = useState<BackendDesignation[]>([]);
+  const [designationsLoading, setDesignationsLoading] = useState(false);
+  const [isCustomDesignationCreate, setIsCustomDesignationCreate] = useState(false);
+  const [isCustomDesignationEdit, setIsCustomDesignationEdit] = useState(false);
 
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -137,6 +144,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
     employee_id: string;
     role_id: number;
     department_id: number | '';
+    designation: string;
     joining_date: string;
     status: string;
     ctc?: number;
@@ -157,6 +165,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
       console.error('Failed to load departments:', e);
     } finally {
       setDeptLoading(false);
+    }
+  }, []);
+
+  const loadDesignations = useCallback(async () => {
+    setDesignationsLoading(true);
+    try {
+      const data = await fetchAllDesignationsApi(false);
+      setAllDesignations(data);
+    } catch (e: any) {
+      console.error('Failed to load designations:', e);
+    } finally {
+      setDesignationsLoading(false);
     }
   }, []);
 
@@ -207,7 +227,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
   useEffect(() => {
     loadRoles();
     loadDepartments();
-  }, [loadRoles, loadDepartments]);
+    loadDesignations();
+  }, [loadRoles, loadDepartments, loadDesignations]);
 
   useEffect(() => {
     loadUsers();
@@ -239,6 +260,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
         setRolesLoading(false);
       }
     }
+    setIsCustomDesignationCreate(false);
     setCreateForm({
       ...defaultCreate,
       role_id: resolvedRoles[resolvedRoles.length - 1]?.id ?? 0,
@@ -279,6 +301,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
       return;
     }
 
+    if (!createForm.department_id) {
+      onShowToast('Validation Error', 'Department is mandatory for onboarding.', 'error');
+      return;
+    }
+
+    if (!createForm.designation?.trim()) {
+      onShowToast('Validation Error', 'Designation is mandatory for onboarding.', 'error');
+      return;
+    }
+
     if (!createForm.joining_date) {
       onShowToast('Validation Error', 'Joining date is mandatory for onboarding.', 'error');
       return;
@@ -296,16 +328,19 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
         first_name: firstName,
         last_name: lastName,
         role_id: createForm.role_id,
-        department_id: createForm.department_id ? Number(createForm.department_id) : null,
+        department_id: Number(createForm.department_id),
+        designation: createForm.designation.trim(),
         joining_date: createForm.joining_date,
         status: 'Pending', // Enforce Pending status on onboarding
         ctc: createForm.ctc,
       });
       onShowToast('Employee Created', `Account for ${firstName} ${lastName} created with Pending status.`, 'success');
       setShowAddModal(false);
+      setIsCustomDesignationCreate(false);
       setCreateForm({ ...defaultCreate });
       loadUsers();
       loadDepartments();
+      loadDesignations();
     } catch (e: any) {
       onShowToast('Create Failed', getErrorMessage(e, 'Failed to create user.'), 'error');
     } finally {
@@ -314,6 +349,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
   };
 
   const handleOpenEdit = (user: BackendUser) => {
+    setIsCustomDesignationEdit(false);
     setEditingUser(user);
     setEditForm({
       first_name: user.first_name,
@@ -322,6 +358,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
       employee_id: user.employee_id,
       role_id: user.role_id,
       department_id: user.department_id || user.department?.id || '',
+      designation: user.designation || '',
       joining_date: user.joining_date ? user.joining_date.split('T')[0] : '',
       status: user.status,
       ctc: user.ctc,
@@ -333,6 +370,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
     if (!editingUser || !editForm) return;
     setEditLoading(true);
     try {
+      if (!editForm.designation?.trim()) {
+        onShowToast('Validation Error', 'Designation cannot be empty.', 'error');
+        return;
+      }
       await updateUserApi(editingUser.id, {
         email: editForm.email,
         first_name: editForm.first_name,
@@ -340,6 +381,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
         employee_id: editForm.employee_id,
         role_id: editForm.role_id,
         department_id: editForm.department_id ? Number(editForm.department_id) : null,
+        designation: editForm.designation.trim(),
         joining_date: editForm.joining_date || null,
         status: editForm.status,
         ctc: editForm.ctc,
@@ -347,8 +389,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
       onShowToast('User Updated', `Updated ${editForm.first_name} ${editForm.last_name}.`, 'success');
       setEditingUser(null);
       setEditForm(null);
+      setIsCustomDesignationEdit(false);
       loadUsers();
       loadDepartments();
+      loadDesignations();
     } catch (e: any) {
       onShowToast('Update Failed', getErrorMessage(e, 'Failed to update user.'), 'error');
     } finally {
@@ -648,6 +692,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                             {user.first_name} {user.last_name}
                           </p>
                           <p className="text-[11px] text-slate-500 font-medium">{user.email}</p>
+                          {user.designation && (
+                            <p className="text-[10px] text-indigo-600 font-semibold mt-0.5">{user.designation}</p>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -850,7 +897,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                 {/* Department Field with Inline Add */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <label className={labelCls}>Department</label>
+                    <label className={labelCls}>Department *</label>
                     <button
                       type="button"
                       onClick={() => { setDeptActionTarget('edit'); setShowAddDeptModal(true); }}
@@ -861,8 +908,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                   </div>
                   <select
                     value={editForm.department_id || ''}
-                    onChange={(e) => setEditForm({ ...editForm, department_id: e.target.value === '' ? '' : Number(e.target.value) })}
+                    onChange={(e) => setEditForm({ ...editForm, department_id: e.target.value === '' ? '' : Number(e.target.value), designation: '' })}
                     className={inputCls}
+                    required
                   >
                     <option value="">-- Select Department --</option>
                     {departments.map((d) => (
@@ -873,6 +921,86 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                   </select>
                 </div>
 
+                {isCustomDesignationEdit ? (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className={labelCls}>Custom Designation *</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCustomDesignationEdit(false);
+                          setEditForm({ ...editForm, designation: '' });
+                        }}
+                        className="text-[10px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1"
+                      >
+                        ← Choose from list
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={editForm.designation}
+                      onChange={(e) => setEditForm({ ...editForm, designation: e.target.value })}
+                      placeholder="e.g. Senior Cloud Architect"
+                      className={inputCls}
+                      autoFocus
+                      required
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className={labelCls}>Designation *</label>
+                      {editForm.department_id && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsCustomDesignationEdit(true);
+                            setEditForm({ ...editForm, designation: '' });
+                          }}
+                          className="text-[10px] text-blue-600 hover:text-blue-800 font-bold"
+                        >
+                          + Add Custom
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      value={editForm.designation}
+                      onChange={(e) => {
+                        if (e.target.value === '__custom__') {
+                          setIsCustomDesignationEdit(true);
+                          setEditForm({ ...editForm, designation: '' });
+                        } else {
+                          setEditForm({ ...editForm, designation: e.target.value });
+                        }
+                      }}
+                      className={inputCls}
+                      disabled={!editForm.department_id}
+                      required
+                    >
+                      <option value="">
+                        {editForm.department_id ? '-- Select Designation --' : '-- Select Department first --'}
+                      </option>
+                      {allDesignations
+                        .filter((d) => d.department_id === Number(editForm.department_id))
+                        .map((d) => (
+                          <option key={d.id} value={d.name}>
+                            {d.name}
+                          </option>
+                        ))}
+                      {editForm.designation && !allDesignations.some(d => d.name === editForm.designation && d.department_id === Number(editForm.department_id)) && (
+                        <option value={editForm.designation}>{editForm.designation}</option>
+                      )}
+                      {editForm.department_id && (
+                        <option value="__custom__" className="font-bold text-blue-600">
+                          + Other / Custom Designation...
+                        </option>
+                      )}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className={labelCls}>CTC (Annual in ₹)</label>
                   <input
@@ -1031,7 +1159,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                 {/* Department Selection with Inline Add */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <label className={labelCls}>Department</label>
+                    <label className={labelCls}>Department *</label>
                     <button
                       type="button"
                       onClick={() => { setDeptActionTarget('create'); setShowAddDeptModal(true); }}
@@ -1042,8 +1170,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                   </div>
                   <select
                     value={createForm.department_id || ''}
-                    onChange={(e) => setCreateForm({ ...createForm, department_id: e.target.value === '' ? '' : Number(e.target.value) })}
+                    onChange={(e) => {
+                      const newDept = e.target.value === '' ? '' : Number(e.target.value);
+                      setCreateForm({ ...createForm, department_id: newDept, designation: '' });
+                    }}
                     className={inputCls}
+                    required
                   >
                     <option value="">-- Select Department --</option>
                     {departments.map((d) => (
@@ -1054,6 +1186,82 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                   </select>
                 </div>
               </div>
+
+              {/* Cascading Designation Selection */}
+              {isCustomDesignationCreate ? (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className={labelCls}>Custom Designation *</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCustomDesignationCreate(false);
+                        setCreateForm({ ...createForm, designation: '' });
+                      }}
+                      className="text-[10px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1"
+                    >
+                      ← Choose from list
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={createForm.designation}
+                    onChange={(e) => setCreateForm({ ...createForm, designation: e.target.value })}
+                    placeholder="e.g. Senior Cloud Architect"
+                    className={inputCls}
+                    autoFocus
+                    required
+                  />
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className={labelCls}>Designation *</label>
+                    {createForm.department_id && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCustomDesignationCreate(true);
+                          setCreateForm({ ...createForm, designation: '' });
+                        }}
+                        className="text-[10px] text-blue-600 hover:text-blue-800 font-bold"
+                      >
+                        + Add Custom
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    value={createForm.designation}
+                    onChange={(e) => {
+                      if (e.target.value === '__custom__') {
+                        setIsCustomDesignationCreate(true);
+                        setCreateForm({ ...createForm, designation: '' });
+                      } else {
+                        setCreateForm({ ...createForm, designation: e.target.value });
+                      }
+                    }}
+                    className={inputCls}
+                    disabled={!createForm.department_id}
+                    required
+                  >
+                    <option value="">
+                      {createForm.department_id ? '-- Select Designation --' : '-- Select Department first --'}
+                    </option>
+                    {allDesignations
+                      .filter((d) => d.department_id === Number(createForm.department_id))
+                      .map((d) => (
+                        <option key={d.id} value={d.name}>
+                          {d.name}
+                        </option>
+                      ))}
+                    {createForm.department_id && (
+                      <option value="__custom__" className="font-bold text-blue-600">
+                        + Other / Custom Designation...
+                      </option>
+                    )}
+                  </select>
+                </div>
+              )}
 
               <div className="text-xs text-slate-500 bg-slate-50/80 border border-slate-200/80 rounded-xl px-3.5 py-2.5 flex items-center gap-2">
                 <Info className="w-4 h-4 text-slate-400 shrink-0" />

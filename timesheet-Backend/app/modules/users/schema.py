@@ -17,6 +17,7 @@ class UserCreate(BaseModel):
     employee_id: Optional[str] = Field(None, max_length=50) # Auto-generated if not provided
     role_id: int = Field(..., ge=1)
     department_id: Optional[int] = None
+    designation: str = Field(..., min_length=2, max_length=100, description="Mandatory employee designation")
     joining_date: date = Field(..., description="Mandatory employee joining date")
     ctc: Optional[float] = Field(None, ge=0.0)
     status: Optional[str] = "Pending"
@@ -49,6 +50,14 @@ class UserCreate(BaseModel):
             raise ValueError("Please provide a valid corporate email address (e.g. user@company.com).")
         return clean
 
+    @field_validator("designation")
+    @classmethod
+    def validate_designation(cls, v: str) -> str:
+        clean = v.strip()
+        if len(clean) < 2:
+            raise ValueError("Designation must be at least 2 characters long.")
+        return clean
+
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
@@ -57,6 +66,7 @@ class UserUpdate(BaseModel):
     employee_id: Optional[str] = Field(None, min_length=1, max_length=50)
     role_id: Optional[int] = Field(None, ge=1)
     department_id: Optional[int] = None
+    designation: Optional[str] = Field(None, min_length=2, max_length=100)
     joining_date: Optional[date] = None
     ctc: Optional[float] = Field(None, ge=0.0)
     status: Optional[str] = None
@@ -74,6 +84,7 @@ class UserResponse(BaseModel):
     employee_id: str
     role_id: int
     department_id: Optional[int] = None
+    designation: Optional[str] = None
     joining_date: Optional[date] = None
     ctc: Optional[float] = None
     status: str
@@ -83,4 +94,3 @@ class UserResponse(BaseModel):
     department: Optional[DepartmentResponse] = None
 
     model_config = ConfigDict(from_attributes=True)
-
