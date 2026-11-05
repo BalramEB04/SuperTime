@@ -90,6 +90,76 @@ const formatStatusName = (status: string) => {
   return status || 'Milestone Planning';
 };
 
+interface MilestoneProgressBarProps {
+  milestone: Milestone;
+  onSave: (percentage: number) => void;
+}
+
+const MilestoneProgressBar: React.FC<MilestoneProgressBarProps> = ({ milestone, onSave }) => {
+  const currentVal = milestone.status === 'achieved' ? 100 : (milestone.completion_percentage ?? 0);
+  const [val, setVal] = useState<number>(currentVal);
+
+  useEffect(() => {
+    setVal(milestone.status === 'achieved' ? 100 : (milestone.completion_percentage ?? 0));
+  }, [milestone.completion_percentage, milestone.status]);
+
+  const isAchieved = milestone.status === 'achieved';
+
+  const handleCommit = (newVal: number) => {
+    if (newVal !== (milestone.completion_percentage ?? 0)) {
+      onSave(newVal);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 min-w-[170px] max-w-[220px]">
+      <div className="flex-1 relative flex items-center">
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value={val}
+          disabled={isAchieved}
+          onChange={(e) => setVal(Number(e.target.value))}
+          onMouseUp={() => handleCommit(val)}
+          onTouchEnd={() => handleCommit(val)}
+          className="w-full h-2 rounded-lg appearance-none cursor-pointer focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{
+            background: `linear-gradient(to right, ${val === 100 ? '#10b981' : '#2563eb'} 0%, ${val === 100 ? '#10b981' : '#3b82f6'} ${val}%, #e2e8f0 ${val}%, #e2e8f0 100%)`
+          }}
+          title={`Drag progress (${val}%)`}
+        />
+      </div>
+      <div className="flex items-center shrink-0">
+        <input
+          type="number"
+          min="0"
+          max="100"
+          value={val}
+          disabled={isAchieved}
+          onChange={(e) => {
+            const num = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+            setVal(num);
+          }}
+          onBlur={() => handleCommit(val)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.currentTarget.blur();
+            }
+          }}
+          className={`w-12 px-1 py-0.5 border rounded text-[11px] font-bold text-center ${val === 100
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+              : 'bg-slate-50 border-slate-300 text-slate-800'
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+          title="Directly enter percentage"
+        />
+        <span className="text-[10px] font-bold text-slate-400 ml-1">%</span>
+      </div>
+    </div>
+  );
+};
+
 export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
   // Pagination
 
@@ -321,32 +391,91 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
 
   const paginatedProjects = filteredProjects.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
+  const getInitialNextMilestoneDates = (project: Project | null) => {
+    if (!project) {
+      const today = new Date().toISOString().split('T')[0];
+      const plus10 = new Date(Date.now() + 10 * 86400000).toISOString().split('T')[0];
+      return { startDate: today, expectedDate: plus10, previousMilestone: null };
+    }
+
+    const projStart = project.startDate || new Date().toISOString().split('T')[0];
+    const projEnd = project.endDate || '';
+
+    const validMilestones = (project.milestones || []).filter(
+      (m) => m.expected_completion_date
+    );
+
+    if (validMilestones.length === 0) {
+      const sDate = projStart;
+      let eDate = new Date(new Date(sDate).getTime() + 10 * 86400000).toISOString().split('T')[0];
+      if (projEnd && eDate > projEnd) eDate = projEnd;
+      return { startDate: sDate, expectedDate: eDate, previousMilestone: null };
+    }
+
+    // Sort to find latest expected_completion_date
+    const sorted = [...validMilestones].sort((a, b) =>
+      (b.expected_completion_date || '').localeCompare(a.expected_completion_date || '')
+    );
+    const latestMilestone = sorted[0];
+    const latestEndStr = latestMilestone.expected_completion_date!;
+
+    // Next start date = 1 day after latest end date
+    const nextStart = new Date(new Date(latestEndStr).getTime() + 86400000).toISOString().split('T')[0];
+    let nextExpected = new Date(new Date(nextStart).getTime() + 10 * 86400000).toISOString().split('T')[0];
+    if (projEnd && nextExpected > projEnd) {
+      nextExpected = projEnd;
+    }
+
+    return {
+      startDate: projEnd && nextStart > projEnd ? projEnd : nextStart,
+      expectedDate: projEnd && nextExpected > projEnd ? projEnd : nextExpected,
+      previousMilestone: latestMilestone,
+    };
+  };
+
   const validateMilestone = (
-    milestone: { start_date: string; expected_completion_date: string; weight_percentage: number },
+    milestone: { start_date: string; expected_completion_date: string; weight_percentage?: number | '' },
     milestoneIdToIgnore?: number
   ): string | null => {
     if (!selectedProject) return 'No project selected.';
 
+    if (!milestone.start_date || !milestone.expected_completion_date) {
+      return 'Both start date and expected completion date are required.';
+    }
+
     const start = new Date(milestone.start_date);
     const end = new Date(milestone.expected_completion_date);
-    const projStart = new Date(selectedProject.startDate);
-    const projEnd = new Date(selectedProject.endDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return 'Invalid milestone date format.';
+    }
 
     if (start > end) {
       return 'Start date must be before or equal to expected completion date.';
     }
 
-    if (start < projStart || end > projEnd) {
-      return `Milestone dates must fall within the project timeline (${selectedProject.startDate} to ${selectedProject.endDate}).`;
+    if (selectedProject.startDate) {
+      const projStart = new Date(selectedProject.startDate);
+      if (!isNaN(projStart.getTime()) && start < projStart) {
+        return `Start date cannot be earlier than project start date (${selectedProject.startDate}).`;
+      }
+    }
+
+    if (selectedProject.endDate) {
+      const projEnd = new Date(selectedProject.endDate);
+      if (!isNaN(projEnd.getTime()) && end > projEnd) {
+        return `Expected completion date cannot be later than project end date (${selectedProject.endDate}).`;
+      }
     }
 
     // Weight check
-    const currentWeight = (selectedProject.milestones || [])
-      .filter((m) => m.id !== milestoneIdToIgnore)
-      .reduce((sum, m) => sum + m.weight_percentage, 0);
+    if (milestone.weight_percentage !== '' && milestone.weight_percentage !== undefined) {
+      const currentWeight = (selectedProject.milestones || [])
+        .filter((m) => m.id !== milestoneIdToIgnore)
+        .reduce((sum, m) => sum + (m.weight_percentage || 0), 0);
 
-    if (currentWeight + Number(milestone.weight_percentage) > 100) {
-      return 'Total milestone weights cannot exceed 100%.';
+      if (currentWeight + Number(milestone.weight_percentage) > 100) {
+        return `Total milestone weights cannot exceed 100%. (Current total of other milestones: ${currentWeight}%).`;
+      }
     }
 
     // Overlap check
@@ -356,10 +485,11 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
 
       const mStart = new Date(m.start_date);
       const mEnd = new Date(m.expected_completion_date);
+      if (isNaN(mStart.getTime()) || isNaN(mEnd.getTime())) continue;
 
       // Overlap logic: (Start A <= End B) and (End A >= Start B)
       if (start <= mEnd && end >= mStart) {
-        return `Milestone dates overlap with existing milestone "${m.name}".`;
+        return `Milestone dates (${milestone.start_date} to ${milestone.expected_completion_date}) overlap with existing milestone "${m.name}" (${m.start_date} to ${m.expected_completion_date}).`;
       }
     }
 
@@ -761,6 +891,19 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
     setSelectedProject({ ...selectedProject, tools: updatedTools });
   };
 
+  const handleOpenAddMilestoneModal = () => {
+    if (!selectedProject) return;
+    const { startDate, expectedDate } = getInitialNextMilestoneDates(selectedProject);
+    setNewMilestone({
+      name: '',
+      description: '',
+      start_date: startDate,
+      expected_completion_date: expectedDate,
+      weight_percentage: '',
+    });
+    setShowAddMilestoneModal(true);
+  };
+
   const handleAddMilestoneSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProject || !newMilestone.name) return;
@@ -782,11 +925,12 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
       }).unwrap();
       onShowToast('Milestone Created', 'Successfully added milestone', 'success');
       setShowAddMilestoneModal(false);
+      const { startDate, expectedDate } = getInitialNextMilestoneDates(selectedProject);
       setNewMilestone({
         name: '',
         description: '',
-        start_date: new Date().toISOString().split('T')[0],
-        expected_completion_date: new Date(new Date().setDate(new Date().getDate() + 10)).toISOString().split('T')[0],
+        start_date: startDate,
+        expected_completion_date: expectedDate,
         weight_percentage: '',
       });
       // We don't locally update selectedProject here, rely on RTK query invalidation which refreshes the project list.
@@ -826,7 +970,20 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
 
   const handleUpdateMilestoneProgress = async (milestoneId: number, completion_percentage: number) => {
     try {
-      await updateMilestone({ id: milestoneId, completion_percentage }).unwrap();
+      const milestone = (selectedProject?.milestones || []).find((m) => m.id === milestoneId);
+      if (completion_percentage === 100 && milestone?.status !== 'achieved') {
+        setAchieveMilestoneId(milestoneId);
+        setAchieveDate(new Date().toISOString().split('T')[0]);
+        setShowAchieveModal(true);
+        return;
+      }
+
+      const payload: any = { id: milestoneId, completion_percentage };
+      if (completion_percentage > 0 && milestone?.status === 'planned') {
+        payload.status = 'in_progress';
+      }
+
+      await updateMilestone(payload).unwrap();
       onShowToast('Progress Updated', `Milestone progress updated to ${completion_percentage}%.`, 'success');
     } catch (err: any) {
       onShowToast('Error', err?.data?.detail || 'Failed to update milestone progress', 'error');
@@ -844,11 +1001,6 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
 
       if (status === 'achieved') {
         additionalData.completion_percentage = 100;
-      } else if (status === 'in_progress') {
-        const target = (selectedProject?.milestones || []).find((m) => m.id === milestoneId);
-        if (!target?.completion_percentage || target.completion_percentage === 0) {
-          additionalData.completion_percentage = 35;
-        }
       } else if (status === 'planned') {
         additionalData.completion_percentage = 0;
       }
@@ -870,6 +1022,10 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
       onShowToast('Error', err?.data?.detail || 'Failed to delete milestone', 'error');
     }
   };
+
+  const addMilestoneError = showAddMilestoneModal && selectedProject ? validateMilestone(newMilestone) : null;
+  const editMilestoneError = showEditMilestoneModal && editingMilestone && selectedProject ? validateMilestone(editingMilestone, editingMilestone.id) : null;
+  const previousMilestoneForNew = selectedProject ? getInitialNextMilestoneDates(selectedProject).previousMilestone : null;
 
   return (
     <div className="space-y-6 text-slate-900 font-sans pb-8">
@@ -1534,7 +1690,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                       <p className="text-slate-500 text-[11px]">Track progress and revenue through milestones.</p>
                     </div>
                     <button
-                      onClick={() => setShowAddMilestoneModal(true)}
+                      onClick={handleOpenAddMilestoneModal}
                       className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5"
                     >
                       <Plus className="w-3.5 h-3.5" />
@@ -1599,29 +1755,10 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                                 </select>
                               </td>
                               <td className="py-3 px-3">
-                                {m.status === 'in_progress' ? (
-                                  <div className="flex items-center gap-1.5 min-w-[110px]">
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      max="99"
-                                      value={m.completion_percentage ?? 35}
-                                      onChange={(e) => {
-                                        const val = Math.min(99, Math.max(0, Number(e.target.value) || 0));
-                                        handleUpdateMilestoneProgress(m.id, val);
-                                      }}
-                                      className="w-14 px-1.5 py-0.5 bg-slate-50 border border-slate-300 rounded text-[11px] font-bold text-blue-700 text-center"
-                                      title="Update progress %"
-                                    />
-                                    <span className="text-[10px] font-bold text-slate-500">%</span>
-                                  </div>
-                                ) : m.status === 'achieved' ? (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                    100%
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-slate-400 font-medium italic">0%</span>
-                                )}
+                                <MilestoneProgressBar
+                                  milestone={m}
+                                  onSave={(val) => handleUpdateMilestoneProgress(m.id, val)}
+                                />
                               </td>
                               <td className="py-3 px-3 text-right">
                                 <div className="flex items-center justify-end gap-2">
@@ -1899,8 +2036,8 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                   disabled={isDeletingProject}
                   onClick={handleConfirmDelete}
                   className={`px-4 py-2 rounded-xl text-white font-bold text-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 ${isAlreadyInactive
-                      ? 'bg-rose-600 hover:bg-rose-700'
-                      : 'bg-amber-600 hover:bg-amber-700'
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-amber-600 hover:bg-amber-700'
                     }`}
                 >
                   {isDeletingProject ? (
@@ -2199,10 +2336,10 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                 disabled={filteredEmployeesForAssignment.length === 0}
                 onClick={handleToggleSelectAll}
                 className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border cursor-pointer transition-all ${filteredEmployeesForAssignment.length === 0
-                    ? 'text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed'
-                    : selectedAssignUserIds.length === filteredEmployeesForAssignment.length && filteredEmployeesForAssignment.length > 0
-                      ? 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-indigo-200'
-                      : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
+                  ? 'text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed'
+                  : selectedAssignUserIds.length === filteredEmployeesForAssignment.length && filteredEmployeesForAssignment.length > 0
+                    ? 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-indigo-200'
+                    : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
                   }`}
               >
                 {selectedAssignUserIds.length === filteredEmployeesForAssignment.length && filteredEmployeesForAssignment.length > 0
@@ -2237,8 +2374,8 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                       key={u.id}
                       onClick={() => handleToggleEmployee(String(u.id))}
                       className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${isChecked
-                          ? 'bg-indigo-50/80 border-indigo-300 ring-1 ring-indigo-400/30'
-                          : 'bg-white border-slate-200/90 hover:border-slate-300 hover:bg-slate-50'
+                        ? 'bg-indigo-50/80 border-indigo-300 ring-1 ring-indigo-400/30'
+                        : 'bg-white border-slate-200/90 hover:border-slate-300 hover:bg-slate-50'
                         }`}
                     >
                       <div className="flex items-center gap-3 min-w-0">
@@ -2534,15 +2671,34 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
             className="w-full max-w-md bg-white/95 backdrop-blur-xl rounded-3xl border border-white/40 shadow-2xl p-7 space-y-5 text-xs font-sans"
           >
             <div className="flex items-center justify-between pb-4 border-b border-slate-200/60">
-              <h3 className="text-base font-black text-slate-900">Add Milestone to Project</h3>
+              <div>
+                <h3 className="text-base font-black text-slate-900">Add Milestone to Project</h3>
+                <p className="text-[11px] text-slate-500 font-medium">Dates cannot overlap with other milestones in this project.</p>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowAddMilestoneModal(false)}
-                className="p-1.5 rounded-lg bg-slate-100 text-slate-500"
+                className="p-1.5 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {previousMilestoneForNew && (
+              <div className="p-3 rounded-2xl bg-blue-50/80 border border-blue-200/80 text-blue-900 text-xs flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+                <span className="leading-snug">
+                  Auto-aligned to start after <strong>"{previousMilestoneForNew.name}"</strong> (ended {previousMilestoneForNew.expected_completion_date}).
+                </span>
+              </div>
+            )}
+
+            {addMilestoneError && (
+              <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span className="font-semibold leading-relaxed">{addMilestoneError}</span>
+              </div>
+            )}
 
             <div className="space-y-3">
               <div className="space-y-1">
@@ -2614,7 +2770,11 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
+                disabled={!!addMilestoneError}
+                className={`px-5 py-2 rounded-xl text-white font-bold transition-all ${addMilestoneError
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-75'
+                    : 'bg-blue-600 hover:bg-blue-700 cursor-pointer shadow-md shadow-blue-500/20'
+                  }`}
               >
                 Add Milestone
               </button>
@@ -2674,18 +2834,28 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
             className="w-full max-w-md bg-white/95 backdrop-blur-xl rounded-3xl border border-white/40 shadow-2xl p-7 space-y-5 text-xs font-sans"
           >
             <div className="flex items-center justify-between pb-4 border-b border-slate-200/60">
-              <h3 className="text-base font-black text-slate-900">Edit Milestone</h3>
+              <div>
+                <h3 className="text-base font-black text-slate-900">Edit Milestone</h3>
+                <p className="text-[11px] text-slate-500 font-medium">Dates cannot overlap with other milestones in this project.</p>
+              </div>
               <button
                 type="button"
                 onClick={() => {
                   setShowEditMilestoneModal(false);
                   setEditingMilestone(null);
                 }}
-                className="p-1.5 rounded-lg bg-slate-100 text-slate-500"
+                className="p-1.5 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {editMilestoneError && (
+              <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span className="font-semibold leading-relaxed">{editMilestoneError}</span>
+              </div>
+            )}
 
             <div className="space-y-3">
               <div className="space-y-1">
@@ -2759,7 +2929,11 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
+                disabled={!!editMilestoneError}
+                className={`px-5 py-2 rounded-xl text-white font-bold transition-all ${editMilestoneError
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-75'
+                    : 'bg-blue-600 hover:bg-blue-700 cursor-pointer shadow-md shadow-blue-500/20'
+                  }`}
               >
                 Save Changes
               </button>

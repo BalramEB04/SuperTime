@@ -181,7 +181,7 @@ class ProjectService:
                         m_resp.completion_percentage = 100.0
                         total_progress += m.weight_percentage
                     elif str(m.status).lower() == "in_progress":
-                        m_prog = getattr(m, "completion_percentage", 0.0) or 35.0
+                        m_prog = float(getattr(m, "completion_percentage", 0.0) or 0.0)
                         m_resp.completion_percentage = m_prog
                         total_progress += (m.weight_percentage * (m_prog / 100.0))
                     else:
@@ -236,10 +236,8 @@ class ProjectService:
                 m_resp = MilestoneResponse.model_validate(m)
                 if str(m.status).lower() == "achieved":
                     m_resp.completion_percentage = 100.0
-                elif str(m.status).lower() == "in_progress" and (not m.completion_percentage or m.completion_percentage == 0.0):
-                    m_resp.completion_percentage = 35.0
                 else:
-                    m_resp.completion_percentage = m.completion_percentage or 0.0
+                    m_resp.completion_percentage = float(m.completion_percentage or 0.0)
 
                 m_resp.planned_value = m_fin.get("pv", 0.0)
                 m_resp.earned_value = m_fin.get("ev", 0.0)
@@ -283,7 +281,7 @@ class ProjectService:
                 if str(m.status).lower() == "achieved":
                     total_progress += m.weight_percentage
                 elif str(m.status).lower() == "in_progress":
-                    m_prog = getattr(m, "completion_percentage", 0.0) or 35.0
+                    m_prog = float(getattr(m, "completion_percentage", 0.0) or 0.0)
                     total_progress += (m.weight_percentage * (m_prog / 100.0))
             resp.completion_percentage = round(min(100.0, total_progress), 1)
             resp.logged_hours = fin_data["logged_hours"]

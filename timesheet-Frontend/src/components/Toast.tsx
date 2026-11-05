@@ -10,7 +10,7 @@ interface ToastProps {
 
 export const ToastContainer: React.FC<ToastProps> = React.memo(({ toasts, onDismiss }) => {
   return (
-    <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+    <div className="fixed bottom-5 right-5 z-[9999] flex flex-col gap-2 max-w-sm w-full pointer-events-none">
       <AnimatePresence>
         {toasts.map((toast) => (
           <motion.div
