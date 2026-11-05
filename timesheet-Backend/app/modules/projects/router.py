@@ -1,7 +1,7 @@
 from typing import List, Optional
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.responses import created_response, success_response
@@ -105,12 +105,39 @@ async def delete_project_document(
 async def download_project_document(
     project_id: int,
     document_id: int,
+    download: Optional[int] = Query(None, description="Set to 1 to force file attachment download"),
     db: AsyncSession = Depends(get_db)
 ):
     service = ProjectService(db)
     doc = await service.repository.get_document_by_id(document_id)
     if not doc or doc.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    # If stored in Vercel Blob (Private Blob)
+    if doc.file_path.startswith("http") and "blob.vercel-storage.com" in doc.file_path:
+        from app.services.storage_service import vercel_blob_service
+        if vercel_blob_service.is_configured:
+            resp, client = vercel_blob_service.stream_file(doc.file_path)
+            if resp.status_code == 200:
+                def iter_file():
+                    try:
+                        for chunk in resp.iter_bytes():
+                            yield chunk
+                    finally:
+                        resp.close()
+                        client.close()
+
+                media_type = doc.file_type or "application/octet-stream"
+                disp_type = "attachment" if download == 1 else "inline"
+                headers = {
+                    "Content-Disposition": f'{disp_type}; filename="{doc.file_name}"',
+                    "Content-Length": str(doc.file_size) if doc.file_size else str(resp.headers.get("content-length", ""))
+                }
+                headers = {k: v for k, v in headers.items() if v}
+                return StreamingResponse(iter_file(), media_type=media_type, headers=headers)
+            else:
+                resp.close()
+                client.close()
 
     # If stored in Object Storage (Neon / AWS S3)
     if not doc.file_path.startswith("/uploads") and not doc.file_path.startswith("http"):

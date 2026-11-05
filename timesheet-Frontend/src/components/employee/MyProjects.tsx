@@ -1,6 +1,7 @@
 import { Pagination } from '../common/Pagination';
 import React, { useState } from 'react';
 import { User, Project, Milestone } from '../../types';
+import { getDocumentDownloadUrl } from '../../store/api/dataApi';
 import {
   FolderKanban,
   Users,
@@ -146,8 +147,8 @@ export const MyProjects: React.FC<MyProjectsProps> = ({
           // Calculate average milestone progress taking in-progress as 35% default
           const totalProgress = milestones.length > 0
             ? Math.round(
-                milestones.reduce((acc, m) => acc + getMilestoneProgress(m), 0) / milestones.length
-              )
+              milestones.reduce((acc, m) => acc + getMilestoneProgress(m), 0) / milestones.length
+            )
             : 0;
 
           const overallProgress = project.completion_percentage && project.completion_percentage > 0
@@ -358,9 +359,8 @@ export const MyProjects: React.FC<MyProjectsProps> = ({
                               <span>Progress: <strong className="text-slate-700">{completion}%</strong></span>
                               <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                                 <div
-                                  className={`h-full rounded-full transition-all ${
-                                    m.status === 'achieved' ? 'bg-emerald-500' : 'bg-indigo-600'
-                                  }`}
+                                  className={`h-full rounded-full transition-all ${m.status === 'achieved' ? 'bg-emerald-500' : 'bg-indigo-600'
+                                    }`}
                                   style={{ width: `${Math.min(100, Math.max(0, completion))}%` }}
                                 />
                               </div>
@@ -405,7 +405,7 @@ export const MyProjects: React.FC<MyProjectsProps> = ({
                           </div>
                         </div>
                         <a
-                          href={doc.filePath}
+                          href={doc.filePath || getDocumentDownloadUrl(selectedProject.id, doc.id)}
                           target="_blank"
                           rel="noopener noreferrer"
                           download={doc.fileName}

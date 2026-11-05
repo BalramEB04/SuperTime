@@ -146,6 +146,10 @@ class Settings(BaseSettings):
     AWS_REGION: str = "us-east-2"
     NEON_STORAGE_BUCKET: str = "assets"
 
+    # Vercel Blob Storage
+    BLOB_READ_WRITE_TOKEN: str = ""
+    VERCEL_BLOB_READ_WRITE_TOKEN: str = ""
+
     model_config = SettingsConfigDict(
         env_file=("../.env", ".env"),
         env_file_encoding="utf-8",

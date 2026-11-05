@@ -15,6 +15,18 @@ import {
   MilestoneUtilizationData,
 } from '../../types';
 
+export const getDocumentDownloadUrl = (
+  projectId: string | number,
+  documentId: string | number,
+  forceDownload: boolean = false
+): string => {
+  const base =
+    import.meta.env.VITE_API_BASE_URL ||
+    (import.meta.env.DEV ? 'http://127.0.0.1:8000/api/v1' : '/api/v1');
+  const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
+  return `${cleanBase}/projects/${projectId}/documents/${documentId}/download${forceDownload ? '?download=1' : ''}`;
+};
+
 // ---------------------------------------------------------------------------
 // Type representing a backend project-assignment (minimal shape)
 // ---------------------------------------------------------------------------
@@ -75,7 +87,7 @@ export interface DailyEodPreviewData {
 function mapBackendTimesheetToFrontend(t: any): TimesheetEntry {
   const billable = t.billable_hours ?? 0;
   const nonBillable = t.non_billable_hours ?? 0;
-  
+
   return {
     id: String(t.id),
     userId: String(t.user_id),
@@ -207,8 +219,8 @@ export const dataApi = apiSlice.injectEndpoints({
           pmName: p.project_manager_name || 'Unknown',
           pmAvatar: '',
           status: p.status || 'Milestone Planning',
-            isActive: p.is_active ?? true,
-            is_active: p.is_active ?? true,
+          isActive: p.is_active ?? true,
+          is_active: p.is_active ?? true,
           budget: p.budget || 0,
           loggedHours: 0,
           billableHours: 0,
@@ -234,18 +246,18 @@ export const dataApi = apiSlice.injectEndpoints({
             id: String(d.id),
             projectId: String(d.project_id),
             fileName: d.file_name,
-            filePath: d.file_path,
+            filePath: getDocumentDownloadUrl(d.project_id, d.id),
             fileSize: d.file_size,
             fileType: d.file_type,
             uploadedAt: d.uploaded_at,
           })) || [],
-          tools: p.tools?.map((t: any) => ({ 
-            id: String(t.toolId || t.id), 
+          tools: p.tools?.map((t: any) => ({
+            id: String(t.toolId || t.id),
             allocationId: String(t.allocationId || t.allocation_id),
             milestoneId: String(t.milestoneId || t.milestone_id || ''),
             milestoneName: t.milestoneName || t.milestone_name || '',
-            name: t.name || '', 
-            category: t.category || '', 
+            name: t.name || '',
+            category: t.category || '',
             monthlyCost: t.monthlyCost || t.monthly_cost || 0,
             seats: t.seats || 1,
             allocationDate: t.allocationDate || t.allocation_date || '',
@@ -676,7 +688,7 @@ export const dataApi = apiSlice.injectEndpoints({
     // -----------------------------------------------------------------------
     // Users
     // -----------------------------------------------------------------------
-    
+
     // -----------------------------------------------------------------------
     // Departments
     // -----------------------------------------------------------------------
@@ -773,9 +785,9 @@ export const dataApi = apiSlice.injectEndpoints({
       providesTags: ['Holiday'],
     }),
     createHoliday: builder.mutation<HolidayItem, Omit<HolidayItem, 'id'>>({
-      query: (body) => ({ 
-        url: '/holidays', 
-        method: 'POST', 
+      query: (body) => ({
+        url: '/holidays',
+        method: 'POST',
         body: {
           name: body.name,
           date: body.date,
@@ -787,9 +799,9 @@ export const dataApi = apiSlice.injectEndpoints({
       invalidatesTags: ['Holiday'],
     }),
     updateHoliday: builder.mutation<HolidayItem, Partial<HolidayItem> & { id: string }>({
-      query: ({ id, ...body }) => ({ 
-        url: `/holidays/${id}`, 
-        method: 'PUT', 
+      query: ({ id, ...body }) => ({
+        url: `/holidays/${id}`,
+        method: 'PUT',
         body: {
           name: body.name,
           date: body.date,
@@ -827,9 +839,9 @@ export const dataApi = apiSlice.injectEndpoints({
       providesTags: ['LeaveType'],
     }),
     createLeaveType: builder.mutation<LeaveTypeConfig, Omit<LeaveTypeConfig, 'id' | 'status'>>({
-      query: (body) => ({ 
-        url: '/leave-types', 
-        method: 'POST', 
+      query: (body) => ({
+        url: '/leave-types',
+        method: 'POST',
         body: {
           name: body.name,
           code: body.code,
@@ -843,9 +855,9 @@ export const dataApi = apiSlice.injectEndpoints({
       invalidatesTags: ['LeaveType'],
     }),
     updateLeaveType: builder.mutation<LeaveTypeConfig, Partial<LeaveTypeConfig> & { id: string }>({
-      query: ({ id, ...body }) => ({ 
-        url: `/leave-types/${id}`, 
-        method: 'PUT', 
+      query: ({ id, ...body }) => ({
+        url: `/leave-types/${id}`,
+        method: 'PUT',
         body: {
           name: body.name,
           code: body.code,
@@ -1028,7 +1040,7 @@ export const dataApi = apiSlice.injectEndpoints({
     // -----------------------------------------------------------------------
     // Daily EOD Report Preview
     // -----------------------------------------------------------------------
-        sendDailyEodToSlack: builder.mutation<{ ok: boolean; message: string }, { date?: string }>({
+    sendDailyEodToSlack: builder.mutation<{ ok: boolean; message: string }, { date?: string }>({
       query: (params) => {
         const d = params?.date;
         return {

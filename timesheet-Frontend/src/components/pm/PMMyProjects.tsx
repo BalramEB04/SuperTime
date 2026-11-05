@@ -18,6 +18,7 @@ import {
   useBatchAssignUsersToProjectsMutation,
   useUploadProjectDocumentMutation,
   useDeleteProjectDocumentMutation,
+  getDocumentDownloadUrl,
 } from '../../store/api/dataApi';
 import {
   Briefcase,
@@ -447,7 +448,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                   id: String(uploadedDoc.id),
                   projectId: String(editFormData.id),
                   fileName: uploadedDoc.file_name || file.name,
-                  filePath: uploadedDoc.file_path,
+                  filePath: getDocumentDownloadUrl(editFormData.id, uploadedDoc.id),
                   fileSize: uploadedDoc.file_size || file.size,
                   fileType: uploadedDoc.file_type || file.type,
                   uploadedAt: uploadedDoc.uploaded_at || new Date().toISOString(),
@@ -1289,7 +1290,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                               </div>
                             </div>
                             <a
-                              href={doc.filePath}
+                              href={doc.filePath || getDocumentDownloadUrl(selectedProject.id, doc.id)}
                               target="_blank"
                               rel="noopener noreferrer"
                               download={doc.fileName}
@@ -1897,11 +1898,10 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                   type="button"
                   disabled={isDeletingProject}
                   onClick={handleConfirmDelete}
-                  className={`px-4 py-2 rounded-xl text-white font-bold text-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 ${
-                    isAlreadyInactive
+                  className={`px-4 py-2 rounded-xl text-white font-bold text-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 ${isAlreadyInactive
                       ? 'bg-rose-600 hover:bg-rose-700'
                       : 'bg-amber-600 hover:bg-amber-700'
-                  }`}
+                    }`}
                 >
                   {isDeletingProject ? (
                     <>
@@ -2063,7 +2063,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <a
-                          href={doc.filePath}
+                          href={doc.filePath || getDocumentDownloadUrl(editFormData.id, doc.id)}
                           target="_blank"
                           rel="noopener noreferrer"
                           download={doc.fileName}
@@ -2198,13 +2198,12 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                 type="button"
                 disabled={filteredEmployeesForAssignment.length === 0}
                 onClick={handleToggleSelectAll}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border cursor-pointer transition-all ${
-                  filteredEmployeesForAssignment.length === 0
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border cursor-pointer transition-all ${filteredEmployeesForAssignment.length === 0
                     ? 'text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed'
                     : selectedAssignUserIds.length === filteredEmployeesForAssignment.length && filteredEmployeesForAssignment.length > 0
-                    ? 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-indigo-200'
-                    : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
-                }`}
+                      ? 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-indigo-200'
+                      : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
+                  }`}
               >
                 {selectedAssignUserIds.length === filteredEmployeesForAssignment.length && filteredEmployeesForAssignment.length > 0
                   ? 'Deselect All'
@@ -2237,17 +2236,16 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                     <div
                       key={u.id}
                       onClick={() => handleToggleEmployee(String(u.id))}
-                      className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
-                        isChecked
+                      className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${isChecked
                           ? 'bg-indigo-50/80 border-indigo-300 ring-1 ring-indigo-400/30'
                           : 'bg-white border-slate-200/90 hover:border-slate-300 hover:bg-slate-50'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <input
                           type="checkbox"
                           checked={isChecked}
-                          onChange={() => {}}
+                          onChange={() => { }}
                           className="w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer pointer-events-none"
                         />
                         <img

@@ -474,11 +474,11 @@ class ProjectService:
         unique_name = generate_unique_filename(file.filename)
         storage_key = f"projects/{project_id}/{unique_name}"
 
-        # If Object Storage (Neon / AWS S3) is configured, upload to cloud storage
+        # If Object Storage (Vercel Blob / Neon / AWS S3) is configured, upload to cloud storage
         if storage_service.is_configured:
             content_type = file.content_type or "application/octet-stream"
-            storage_service.upload_file(content=content, key=storage_key, content_type=content_type)
-            stored_path = storage_key
+            res = storage_service.upload_file(content=content, key=storage_key, content_type=content_type)
+            stored_path = res["url"]
         else:
             dest_dir = Path("uploads") / "projects" / str(project_id)
             dest_dir.mkdir(parents=True, exist_ok=True)
@@ -512,8 +512,8 @@ class ProjectService:
         if not doc or doc.project_id != project_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-        # Delete from S3/Neon if it is an object key
-        if storage_service.is_configured and not doc.file_path.startswith("/uploads") and not doc.file_path.startswith("http"):
+        # Delete from cloud storage if configured
+        if storage_service.is_configured and not doc.file_path.startswith("/uploads"):
             storage_service.delete_file(doc.file_path)
         else:
             rel_path = doc.file_path.lstrip("/")
