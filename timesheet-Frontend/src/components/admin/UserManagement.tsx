@@ -1000,19 +1000,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ currentUser, onS
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className={labelCls}>CTC (Annual in ₹)</label>
-                  <input
-                    type="number"
-                    value={editForm.ctc !== undefined ? editForm.ctc : ''}
-                    onChange={(e) => setEditForm({ ...editForm, ctc: e.target.value ? Number(e.target.value) : undefined })}
-                    className={inputCls}
-                    placeholder="E.g., 500000"
-                  />
-                </div>
-              </div>
-
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1">
                   <label className={labelCls}>System Role</label>

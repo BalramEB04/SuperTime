@@ -297,12 +297,6 @@ export const Sidebar: React.FC<SidebarProps> = React.memo(({
         desc: 'Organization Holiday Calendar',
       },
       {
-        id: 'admin_leave_types',
-        label: 'Leave Types',
-        icon: CalendarX,
-        desc: 'Leave Categories & Entitlements',
-      },
-      {
         id: 'admin_working_calendar',
         label: 'Working Calendar',
         icon: CalendarDays,

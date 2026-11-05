@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, Project, TimesheetEntry, LeaveRequest, ActivityLog } from '../../types';
-import { useGetDashboardSummaryQuery, useGetUpcomingLeavesQuery } from '../../store/api/dataApi';
+import { useGetDashboardSummaryQuery, useGetToolsQuery } from '../../store/api/dataApi';
+import { formatINR } from '../../utils/formatters';
 import {
     Users,
     Clock,
@@ -22,9 +23,9 @@ import {
     ArrowDownRight,
     X,
     LayoutDashboard,
+    Wrench,
 } from 'lucide-react';
 import { AdminTab } from '../Sidebar';
-import { UpcomingLeavesWidget } from '../shared/UpcomingLeavesWidget';
 import { TiltCard } from '../ui/TiltCard';
 
 interface AdminOverviewProps {
@@ -57,8 +58,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
     const safeProjects = projects || [];
 
     const { data: dashboardData, isLoading } = useGetDashboardSummaryQuery();
-    const { data: upcomingLeaves = [] } = useGetUpcomingLeavesQuery();
-    const [showLeavesModal, setShowLeavesModal] = useState(false);
+    const { data: tools = [], isLoading: toolsLoading } = useGetToolsQuery();
 
     if (isLoading) {
         return (
@@ -76,7 +76,9 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
     const pendingLeaves = safeLeaveRequests.filter((l) => l.status.toLowerCase() === 'pending');
     const pendingLeavesCount = adminOverview.pending_leaves_count ?? pendingLeaves.length;
     const activeProjectsCount = adminOverview.active_projects_count ?? safeProjects.length;
-    const upcomingLeavesCount = upcomingLeaves.length;
+
+    const totalToolsCount = tools.length;
+    const activeToolsCount = tools.filter((t) => (t.status || 'Active').toLowerCase() === 'active').length;
 
     const nextHoliday = dashboardData?.upcoming_holiday;
 
@@ -138,22 +140,25 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <h3 className="text-2xl font-black text-slate-900 mt-1">{activeUsersCount || 0}</h3>
                 </TiltCard>
 
-                {/* Leave Count with 3D Tilt (Non-clickable) */}
+                {/* Tool Count with 3D Tilt (Non-clickable) */}
                 <TiltCard
                     maxRotation={7}
                     className="bg-white/90 backdrop-blur-md border border-slate-200/90 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow"
                 >
                     <div className="flex items-center justify-between mb-2">
-                        <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
-                            <Clock className="w-4 h-4" />
+                            <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                                <Wrench className="w-4 h-4" />
+                            </div>
+                            <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/60">
+                                {activeToolsCount} Active
+                            </span>
                         </div>
-                    </div>
-                    <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                        Leave Count
-                    </p>
-                    <h3 className="text-2xl font-black text-slate-900 mt-1">
-                        {upcomingLeavesCount}
-                    </h3>
+                        <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
+                            Tool Count
+                        </p>
+                        <h3 className="text-2xl font-black text-slate-900 mt-1">
+                            {totalToolsCount}
+                        </h3>
                 </TiltCard>
 
                 {/* Next Holiday with 3D Tilt (Non-clickable) */}
@@ -172,11 +177,87 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 </TiltCard>
             </div>
 
-            {/* Middle Section: Upcoming Leaves & Upcoming Holidays */}
+            {/* Middle Section: Tools Configured & Upcoming Holidays */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {/* Upcoming Leaves Widget (8 cols) */}
-                <div className="lg:col-span-8">
-                    <UpcomingLeavesWidget className="h-full max-h-[400px]" />
+                {/* Tools Configured Widget (8 cols) */}
+                <div className="lg:col-span-8 bg-white border border-slate-200 p-5 rounded-2xl shadow-2xs space-y-4 flex flex-col justify-between">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                        <div className="flex items-center gap-2.5">
+                            <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
+                                <Wrench className="w-4 h-4" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-extrabold text-slate-900">Tools Configured</h3>
+                                <p className="text-[11px] text-slate-500 font-medium">Enterprise master tools &amp; services catalog</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => onNavigateTab('admin_tools')}
+                            className="text-blue-600 hover:text-blue-700 text-xs font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                            <span>Manage Tools</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto max-h-[320px] pr-1">
+                        {toolsLoading ? (
+                            <div className="flex justify-center items-center py-12 text-slate-400 text-xs">
+                                Loading tools catalog...
+                            </div>
+                        ) : tools.length === 0 ? (
+                            <div className="text-center py-10 space-y-2">
+                                <Wrench className="w-8 h-8 text-slate-300 mx-auto" />
+                                <p className="text-xs text-slate-500 font-medium">No tools configured yet in the catalog.</p>
+                                <button
+                                    onClick={() => onNavigateTab('admin_tools')}
+                                    className="text-xs text-blue-600 font-bold hover:underline cursor-pointer"
+                                >
+                                    + Add New Tool
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {tools.map((t) => (
+                                    <div
+                                        key={t.id}
+                                        className="p-3 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-white hover:border-blue-200 hover:shadow-xs transition-all flex items-center justify-between gap-3"
+                                    >
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <p className="text-xs font-bold text-slate-900 truncate" title={t.name}>
+                                                    {t.name}
+                                                </p>
+                                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${t.status?.toLowerCase() === 'active'
+                                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+                                                        : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                                    }`}>
+                                                    {t.status || 'Active'}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                                                <span className="font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px]">
+                                                    {t.category || 'General'}
+                                                </span>
+                                                {t.cost_per_month ? (
+                                                    <span className="font-mono text-slate-700 font-bold">
+                                                        {formatINR(t.cost_per_month)}/mo
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-slate-400 italic text-[10px]">No cost</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                        <span>{activeToolsCount} active of {totalToolsCount} total configured</span>
+                        <span className="text-slate-400">Synchronized with master catalog</span>
+                    </div>
                 </div>
 
                 {/* Sidebar Card: Upcoming Holidays (4 cols) */}
@@ -194,7 +275,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <div className="space-y-3">
                         {nextHoliday ? (
                             <div
-                                className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 transition-colors group cursor-pointer border border-transparent hover:border-slate-200"
+                                className="flex items-center gap-3 p-2 rounded-xl bg-slate-50/50 border border-slate-100"
                             >
                                 <div className="w-11 h-11 rounded-xl bg-slate-50 border border-slate-200 flex flex-col items-center justify-center shrink-0 group-hover:bg-blue-50 group-hover:border-blue-200 transition-colors">
                                     <span className="text-[9px] font-extrabold text-blue-600 uppercase leading-none">
@@ -318,29 +399,6 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     </table>
                 </div>
             </div>
-
-            {/* Team Leaves Modal */}
-            {showLeavesModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                    <div
-                        className="bg-white w-full max-w-3xl max-h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden"
-                    >
-                        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                            <h2 className="text-xl font-black text-slate-900">Team Leaves Details</h2>
-                            <button
-                                onClick={() => setShowLeavesModal(false)}
-                                className="p-2 hover:bg-slate-200 rounded-full transition-colors"
-                            >
-                                <X className="w-5 h-5 text-slate-500" />
-                            </button>
-                        </div>
-
-                        <div className="p-6 overflow-y-auto">
-                            <UpcomingLeavesWidget />
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };
