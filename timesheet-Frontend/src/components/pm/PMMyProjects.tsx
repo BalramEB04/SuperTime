@@ -15,6 +15,7 @@ import {
   useDeleteMilestoneMutation,
   useGetToolsQuery,
   useGetUsersQuery,
+  useBatchAssignUsersToProjectsMutation,
   useUploadProjectDocumentMutation,
   useDeleteProjectDocumentMutation,
 } from '../../store/api/dataApi';
@@ -121,6 +122,13 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
   const [createMilestone] = useCreateMilestoneMutation();
   const [updateMilestone] = useUpdateMilestoneMutation();
   const [deleteMilestone] = useDeleteMilestoneMutation();
+
+  // Batch Assign Team Members Mutation & States
+  const [batchAssignUsers, { isLoading: isBatchAssigning }] = useBatchAssignUsersToProjectsMutation();
+  const [selectedAssignUserIds, setSelectedAssignUserIds] = useState<string[]>([]);
+  const [assignSearch, setAssignSearch] = useState('');
+  const [assignDeptFilter, setAssignDeptFilter] = useState('all');
+  const [assignAvailabilityFilter, setAssignAvailabilityFilter] = useState<'all' | 'free' | 'busy'>('all');
 
   // Helper to update URL param cleanly
   const updateUrlProjectId = (projId: string | null) => {
@@ -487,6 +495,127 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
     updateUrlProjectId(null);
   };
 
+  // Computed available employees for the dedicated multi-select assign modal
+  const assignedUserIdSet = React.useMemo(() => {
+    return new Set(
+      (selectedProject?.assignedUserIds || (selectedProject as any)?.assigned_user_ids || []).map(String)
+    );
+  }, [selectedProject]);
+
+  const availableEmployeesForAssignment = React.useMemo(() => {
+    return resolvedUsers.filter(
+      (u) =>
+        (u.role === 'employee' || u.role === 'pm') &&
+        u.status?.toLowerCase() === 'active' &&
+        !assignedUserIdSet.has(String(u.id))
+    );
+  }, [resolvedUsers, assignedUserIdSet]);
+
+  const assignDepartmentList = React.useMemo(() => {
+    return Array.from(new Set(availableEmployeesForAssignment.map((u) => u.department).filter(Boolean)));
+  }, [availableEmployeesForAssignment]);
+
+  const employeeProjectMap = React.useMemo(() => {
+    const map = new Map<string, { count: number; projects: Array<{ id: string; name: string; code: string }> }>();
+    (projects || []).forEach((p) => {
+      const isProjActive = p.isActive !== false && (p as any).is_active !== false;
+      if (!isProjActive) return;
+      const assignedIds = (p.assignedUserIds && p.assignedUserIds.length > 0)
+        ? p.assignedUserIds
+        : ((p as any).assigned_user_ids || []);
+      assignedIds.forEach((uId: any) => {
+        const uIdStr = String(uId);
+        if (!map.has(uIdStr)) {
+          map.set(uIdStr, { count: 0, projects: [] });
+        }
+        const entry = map.get(uIdStr)!;
+        entry.count += 1;
+        entry.projects.push({ id: String(p.id), name: p.name, code: p.code });
+      });
+    });
+    return map;
+  }, [projects]);
+
+  const filteredEmployeesForAssignment = React.useMemo(() => {
+    const list = availableEmployeesForAssignment.filter((u) => {
+      const matchesDept = assignDeptFilter === 'all' || u.department === assignDeptFilter;
+      if (!matchesDept) return false;
+
+      const projCount = employeeProjectMap.get(String(u.id))?.count || 0;
+      if (assignAvailabilityFilter === 'free' && projCount > 0) return false;
+      if (assignAvailabilityFilter === 'busy' && projCount === 0) return false;
+
+      if (!assignSearch.trim()) return true;
+      const q = assignSearch.toLowerCase();
+      return (
+        u.name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        (u.title && u.title.toLowerCase().includes(q))
+      );
+    });
+
+    // Option C: Sort Available/Free (0 projects) to the top first, then by project count, then alphabetically
+    return [...list].sort((a, b) => {
+      const countA = employeeProjectMap.get(String(a.id))?.count || 0;
+      const countB = employeeProjectMap.get(String(b.id))?.count || 0;
+      if (countA !== countB) return countA - countB;
+      return a.name.localeCompare(b.name);
+    });
+  }, [availableEmployeesForAssignment, assignDeptFilter, assignAvailabilityFilter, assignSearch, employeeProjectMap]);
+
+  const handleToggleSelectAll = () => {
+    if (
+      selectedAssignUserIds.length === filteredEmployeesForAssignment.length &&
+      filteredEmployeesForAssignment.length > 0
+    ) {
+      setSelectedAssignUserIds([]);
+    } else {
+      setSelectedAssignUserIds(filteredEmployeesForAssignment.map((u) => String(u.id)));
+    }
+  };
+
+  const handleToggleEmployee = (id: string) => {
+    setSelectedAssignUserIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBatchAssignEmployees = async () => {
+    if (!selectedProject || selectedAssignUserIds.length === 0) return;
+
+    try {
+      const res = await batchAssignUsers({
+        project_ids: [Number(selectedProject.id)],
+        user_ids: selectedAssignUserIds.map(Number),
+      }).unwrap();
+
+      const data = res?.data || res;
+      onShowToast(
+        'Team Members Assigned',
+        `Assigned ${data.assigned_count || selectedAssignUserIds.length} employee(s) to ${selectedProject.name}.`,
+        'success'
+      );
+
+      // Local state sync
+      const currentAssigned = (selectedProject.assignedUserIds || (selectedProject as any).assigned_user_ids || []).map(String);
+      const updatedIds = Array.from(new Set([...currentAssigned, ...selectedAssignUserIds.map(String)]));
+      setSelectedProject({
+        ...selectedProject,
+        assignedUserIds: updatedIds,
+      });
+
+      setShowAssignModal(false);
+      setSelectedAssignUserIds([]);
+      setAssignSearch('');
+      setAssignDeptFilter('all');
+      setAssignAvailabilityFilter('all');
+    } catch (err: any) {
+      console.error('Batch assign failed:', err);
+      const msg = err?.data?.message || err?.message || 'Failed to assign team members.';
+      onShowToast('Assignment Failed', msg, 'error');
+    }
+  };
+
   const handleAssignUser = () => {
     if (!selectedProject || !selectedUserId) return;
     onAssignUserToProject(selectedProject.id, selectedUserId);
@@ -495,7 +624,6 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
     setShowAssignModal(false);
     setSelectedUserId('');
 
-    // Update selectedProject in local view
     const updated = {
       ...selectedProject,
       assignedUserIds: [...(selectedProject.assignedUserIds || []).map(String), String(selectedUserId)],
@@ -1190,11 +1318,17 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setShowAssignModal(true)}
-                      className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                      onClick={() => {
+                        setSelectedAssignUserIds([]);
+                        setAssignSearch('');
+                        setAssignDeptFilter('all');
+                        setAssignAvailabilityFilter('all');
+                        setShowAssignModal(true);
+                      }}
+                      className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
                     >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Assign Employee</span>
+                      <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                      <span>Assign Team Members</span>
                     </button>
                   </div>
 
@@ -1974,57 +2108,255 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
         </div>
       )}
 
-      {/* ASSIGN EMPLOYEE MODAL */}
+      {/* ASSIGN MULTIPLE EMPLOYEES MODAL */}
       {showAssignModal && selectedProject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md">
-          <div className="w-full max-w-md bg-white/95 backdrop-blur-xl rounded-3xl border border-white/40 shadow-2xl p-7 space-y-5 text-xs font-sans">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-200/60">
-              <h3 className="text-base font-black text-slate-900">Assign Employee to {selectedProject.name}</h3>
+          <div className="w-full max-w-xl bg-white rounded-3xl border border-slate-200/80 shadow-2xl p-6 sm:p-7 space-y-4 text-xs font-sans">
+            {/* Header */}
+            <div className="flex items-start justify-between pb-3.5 border-b border-slate-200">
+              <div>
+                <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-indigo-600" />
+                  <span>Assign Team Members</span>
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Assign multiple active engineers to <strong>{selectedProject.name}</strong> ({selectedProject.code})
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowAssignModal(false)}
-                className="p-1.5 rounded-lg bg-slate-100 text-slate-500"
+                className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="space-y-2">
-              <label className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Select Employee</label>
-              <select
-                value={selectedUserId}
-                onChange={(e) => setSelectedUserId(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-medium"
-              >
-                <option value="">-- Select an employee --</option>
-                {resolvedUsers
-                  .filter((u) => u.role === 'employee' || u.role === 'pm')
-                  .filter((u) => u.status?.toLowerCase() === 'active')
-                  .filter((u) => !(selectedProject.assignedUserIds || (selectedProject as any).assigned_user_ids || []).map(String).includes(String(u.id)))
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.title} • {u.department})
+            {/* Filter Bar: Department & Availability */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="font-bold text-slate-700 uppercase tracking-wider text-[10px] block mb-1">
+                  Filter by Department
+                </label>
+                <select
+                  value={assignDeptFilter}
+                  onChange={(e) => setAssignDeptFilter(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-xs"
+                >
+                  <option value="all">All Departments</option>
+                  {assignDepartmentList.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
                     </option>
                   ))}
-              </select>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 uppercase tracking-wider text-[10px] block mb-1">
+                  Filter by Availability
+                </label>
+                <select
+                  value={assignAvailabilityFilter}
+                  onChange={(e) => setAssignAvailabilityFilter(e.target.value as any)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-xs"
+                >
+                  <option value="all">All Active Employees</option>
+                  <option value="free">Available / Free Only (0 projects)</option>
+                  <option value="busy">Assigned (1+ projects)</option>
+                </select>
+              </div>
             </div>
 
-            <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={assignSearch}
+                onChange={(e) => setAssignSearch(e.target.value)}
+                placeholder="Search team member by name, email, designation..."
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {assignSearch && (
+                <button
+                  type="button"
+                  onClick={() => setAssignSearch('')}
+                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Selection Header */}
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[11px] font-bold text-slate-700">
+                {selectedAssignUserIds.length} of {filteredEmployeesForAssignment.length} available selected
+              </span>
               <button
                 type="button"
-                onClick={() => setShowAssignModal(false)}
-                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-semibold"
+                disabled={filteredEmployeesForAssignment.length === 0}
+                onClick={handleToggleSelectAll}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border cursor-pointer transition-all ${
+                  filteredEmployeesForAssignment.length === 0
+                    ? 'text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed'
+                    : selectedAssignUserIds.length === filteredEmployeesForAssignment.length && filteredEmployeesForAssignment.length > 0
+                    ? 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-indigo-200'
+                    : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
+                }`}
               >
-                Cancel
+                {selectedAssignUserIds.length === filteredEmployeesForAssignment.length && filteredEmployeesForAssignment.length > 0
+                  ? 'Deselect All'
+                  : 'Select All'}
               </button>
-              <button
-                type="button"
-                disabled={!selectedUserId}
-                onClick={handleAssignUser}
-                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold"
-              >
-                Assign
-              </button>
+            </div>
+
+            {/* Employee Checkbox List */}
+            <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1 border border-slate-100 rounded-2xl p-2 bg-slate-50/50">
+              {filteredEmployeesForAssignment.length === 0 ? (
+                <div className="py-8 px-4 text-center">
+                  {availableEmployeesForAssignment.length === 0 ? (
+                    <>
+                      <div className="w-9 h-9 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto mb-2">
+                        <CheckCircle2 className="w-4 h-4" />
+                      </div>
+                      <p className="font-bold text-slate-800 text-xs">All Team Members Already Assigned</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        All active employees are already assigned to {selectedProject.name}.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-slate-400 text-xs py-4">No employees match your search or filter</p>
+                  )}
+                </div>
+              ) : (
+                filteredEmployeesForAssignment.map((u) => {
+                  const isChecked = selectedAssignUserIds.includes(String(u.id));
+                  return (
+                    <div
+                      key={u.id}
+                      onClick={() => handleToggleEmployee(String(u.id))}
+                      className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        isChecked
+                          ? 'bg-indigo-50/80 border-indigo-300 ring-1 ring-indigo-400/30'
+                          : 'bg-white border-slate-200/90 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {}}
+                          className="w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer pointer-events-none"
+                        />
+                        <img
+                          src={u.avatar || 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80'}
+                          alt={u.name}
+                          className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <p className="font-extrabold text-slate-900 text-xs truncate">{u.name}</p>
+                          <p className="text-[10px] text-slate-400 truncate">{u.email}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {(() => {
+                          const pData = employeeProjectMap.get(String(u.id));
+                          const pCount = pData?.count || 0;
+                          const pTooltip = pCount > 0
+                            ? `Currently on ${pCount} project(s): ${pData.projects.map((p) => `${p.code} (${p.name})`).join(', ')}`
+                            : 'Available / Free (Not assigned to any project)';
+
+                          if (pCount === 0) {
+                            return (
+                              <span
+                                title={pTooltip}
+                                className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0"
+                              >
+                                0 projects • Free
+                              </span>
+                            );
+                          }
+                          if (pCount === 1) {
+                            return (
+                              <span
+                                title={pTooltip}
+                                className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-200 shrink-0"
+                              >
+                                1 project
+                              </span>
+                            );
+                          }
+                          if (pCount === 2) {
+                            return (
+                              <span
+                                title={pTooltip}
+                                className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0"
+                              >
+                                2 projects
+                              </span>
+                            );
+                          }
+                          return (
+                            <span
+                              title={pTooltip}
+                              className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200 shrink-0"
+                            >
+                              {pCount} projects • Heavy
+                            </span>
+                          );
+                        })()}
+
+                        <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                          {u.title || 'Employee'}
+                        </span>
+                        {u.department && (
+                          <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                            {u.department}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-600">
+                {selectedAssignUserIds.length} employee{selectedAssignUserIds.length !== 1 ? 's' : ''} selected
+              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAssignModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedAssignUserIds.length === 0 || isBatchAssigning}
+                  onClick={handleBatchAssignEmployees}
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
+                >
+                  {isBatchAssigning ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Assigning...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                      <span>Assign Selected ({selectedAssignUserIds.length})</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
