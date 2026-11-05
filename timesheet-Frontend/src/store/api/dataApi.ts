@@ -453,6 +453,23 @@ export const dataApi = apiSlice.injectEndpoints({
       invalidatesTags: ['Timesheet'],
     }),
 
+    deleteDailyTimesheet: builder.mutation<{ deleted_count: number; date: string }, string>({
+      query: (date) => ({
+        url: `/timesheets/date/${date}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Timesheet', 'Utilization', 'Dashboard'],
+    }),
+
+    syncDailyTimesheet: builder.mutation<void, { date: string; entries: TimesheetCreatePayload[] }>({
+      query: ({ date, entries }) => ({
+        url: `/timesheets/date/${date}`,
+        method: 'PUT',
+        body: entries,
+      }),
+      invalidatesTags: ['Timesheet', 'Utilization', 'Dashboard'],
+    }),
+
     // -----------------------------------------------------------------------
     // Leave Requests
     // -----------------------------------------------------------------------
@@ -1077,6 +1094,8 @@ export const {
   useCreateTimesheetsMutation,
   useUpdateTimesheetMutation,
   useDeleteTimesheetMutation,
+  useDeleteDailyTimesheetMutation,
+  useSyncDailyTimesheetMutation,
   // Leave
   useGetLeaveRequestsQuery,
   useGetUpcomingLeavesQuery,

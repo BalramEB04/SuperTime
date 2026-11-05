@@ -52,13 +52,46 @@ class TimesheetValidator:
         project_id: int,
         milestone_id: Optional[int],
     ) -> None:
-        if not milestone_id:
-            return
         from app.modules.milestones.model import Milestone
-        result = await db.execute(select(Milestone).filter(Milestone.id == milestone_id))
-        milestone = result.scalar_one_or_none()
-        if not milestone or milestone.project_id != project_id:
-            raise BadRequestException(detail="Selected milestone does not belong to this project.")
+        from app.modules.projects.model import Project
+        from sqlalchemy import func
+
+        # Fetch project details for descriptive error messages
+        proj_res = await db.execute(select(Project).where(Project.id == project_id))
+        proj = proj_res.scalar_one_or_none()
+        proj_name = proj.project_name if proj else f"ID {project_id}"
+
+        # Fetch all milestones configured for this project
+        m_stmt = select(Milestone).where(Milestone.project_id == project_id)
+        res = await db.execute(m_stmt)
+        all_milestones = list(res.scalars().all())
+
+        # RULE A: A project MUST have milestones configured before timesheets can be logged
+        if not all_milestones:
+            raise BadRequestException(
+                detail=f"Cannot submit timesheet: Project Manager has not yet configured milestones for project '{proj_name}'."
+            )
+
+        active_milestones = [
+            m for m in all_milestones if str(m.status).lower() != "achieved"
+        ]
+
+        if not active_milestones:
+            raise BadRequestException(
+                detail=f"Cannot submit timesheet: All milestones for project '{proj_name}' have already been achieved. Please contact your Project Manager."
+            )
+
+        # Milestone selection is strictly mandatory
+        if not milestone_id:
+            raise BadRequestException(
+                detail=f"Milestone selection is mandatory for project '{proj_name}'."
+            )
+
+        matched = any(m.id == milestone_id for m in active_milestones)
+        if not matched:
+            any_matched = any(m.id == milestone_id for m in all_milestones)
+            if not any_matched:
+                raise BadRequestException(detail=f"Selected milestone does not belong to project '{proj_name}'.")
 
     @staticmethod
     def validate_no_duplicate_milestones(timesheets: list) -> None:

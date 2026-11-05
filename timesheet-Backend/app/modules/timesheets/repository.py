@@ -231,3 +231,34 @@ class TimesheetRepository:
     async def delete(db: AsyncSession, timesheet: Timesheet) -> None:
         await db.delete(timesheet)
         await db.commit()
+
+
+    @staticmethod
+    async def get_by_user_and_date(
+        db: AsyncSession, user_id: int, timesheet_date: date
+    ) -> List[Timesheet]:
+        result = await db.execute(
+            select(Timesheet)
+            .options(
+                selectinload(Timesheet.user),
+                selectinload(Timesheet.project_assignment).selectinload(ProjectAssignment.project),
+                selectinload(Timesheet.milestone),
+            )
+            .filter(
+                Timesheet.user_id == user_id,
+                Timesheet.timesheet_date == timesheet_date,
+            )
+            .order_by(Timesheet.id.asc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def delete_by_user_and_date(
+        db: AsyncSession, user_id: int, timesheet_date: date
+    ) -> int:
+        entries = await TimesheetRepository.get_by_user_and_date(db, user_id, timesheet_date)
+        count = len(entries)
+        for entry in entries:
+            await db.delete(entry)
+        await db.commit()
+        return count

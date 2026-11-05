@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, Project, TimesheetEntry } from '../../types';
-import { ProjectAssignment, TimesheetCreatePayload, useCreateTimesheetsMutation, useGetLeaveForDateQuery, useGetHolidaysQuery, useGetWorkingCalendarQuery, useGetMyLeaveRequestsQuery } from '../../store/api/dataApi';
+import { ProjectAssignment, TimesheetCreatePayload, useCreateTimesheetsMutation, useSyncDailyTimesheetMutation, useGetLeaveForDateQuery, useGetHolidaysQuery, useGetWorkingCalendarQuery, useGetMyLeaveRequestsQuery } from '../../store/api/dataApi';
 import { MarkLeaveModal } from './MarkLeaveModal';
 import {
   Clock,
@@ -40,6 +40,7 @@ interface SubmitTimesheetProps {
   projectAssignments?: ProjectAssignment[];
   onUpdateTimesheet?: (entry: TimesheetEntry) => void;
   editingEntry?: TimesheetEntry | null;
+  editingDateEntries?: TimesheetEntry[] | null;
   defaultDate?: string | null;
   initialOpenMarkLeave?: boolean;
   onCloseMarkLeaveModal?: () => void;
@@ -109,6 +110,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
   onSubmitTimesheet,
   onUpdateTimesheet,
   editingEntry,
+  editingDateEntries,
   defaultDate,
   initialOpenMarkLeave,
   onCloseMarkLeaveModal,
@@ -149,6 +151,13 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
   }, [initialOpenMarkLeave, onCloseMarkLeaveModal]);
 
   const [createTimesheets, { isLoading: isSubmitting }] = useCreateTimesheetsMutation();
+  const [syncDailyTimesheet, { isLoading: isSyncing }] = useSyncDailyTimesheetMutation();
+
+  const isDateEditMode = Boolean(editingDateEntries && editingDateEntries.length > 0);
+  const isSingleEntryEdit = Boolean(editingEntry && !isDateEditMode);
+  const isEditing = isDateEditMode || isSingleEntryEdit;
+  const activeEditDate = isDateEditMode ? editingDateEntries![0].date : editingEntry ? editingEntry.date : null;
+
   const assignedProjects = useMemo(
     () => (projects || []).filter((p) =>
       p.assignedUserIds?.includes(currentUser.id) &&
@@ -160,10 +169,10 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
   const displaySidebarProjects = assignedProjects;
 
   useEffect(() => {
-    if (defaultDate && !editingEntry) {
-      setRows((prev) => prev.map((r, i) => (i === 0 ? { ...r, date: defaultDate } : r)));
+    if (defaultDate && !isEditing) {
+      setRows((prev) => prev.map((r) => ({ ...r, date: defaultDate })));
     }
-  }, [defaultDate, editingEntry]);
+  }, [defaultDate, isEditing]);
 
   // Missing EODs calculation strictly within active submission window (ONLY dates available to fill)
   const missingEodDates = useMemo(() => {
@@ -213,6 +222,18 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
   }, [timesheets, currentUser.id, effectiveMinAllowedDate, minAllowedDate, employeeJoinDate, today, holidaysList, myLeaveRequests]);
 
   const [rows, setRows] = useState<FormRow[]>(() => {
+    if (editingDateEntries && editingDateEntries.length > 0) {
+      return editingDateEntries.map((e) => ({
+        rowId: generateRowId(),
+        projectId: e.projectId,
+        milestoneId: e.milestoneId ? String(e.milestoneId) : '',
+        date: e.date,
+        billableHours: e.billableHours,
+        nonBillableHours: e.nonBillableHours,
+        billableDescription: e.billableDescription || e.description || '',
+        nonBillableDescription: e.nonBillableDescription || '',
+      }));
+    }
     if (editingEntry) {
       return [{
         rowId: generateRowId(),
@@ -229,6 +250,34 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
     const resolvedInitialDate = employeeJoinDate && initialDate < employeeJoinDate ? employeeJoinDate : initialDate;
     return [createEmptyRow(resolvedInitialDate)];
   });
+
+  useEffect(() => {
+    if (editingDateEntries && editingDateEntries.length > 0) {
+      setRows(
+        editingDateEntries.map((e) => ({
+          rowId: generateRowId(),
+          projectId: e.projectId,
+          milestoneId: e.milestoneId ? String(e.milestoneId) : '',
+          date: e.date,
+          billableHours: e.billableHours,
+          nonBillableHours: e.nonBillableHours,
+          billableDescription: e.billableDescription || e.description || '',
+          nonBillableDescription: e.nonBillableDescription || '',
+        }))
+      );
+    } else if (editingEntry) {
+      setRows([{
+        rowId: generateRowId(),
+        projectId: editingEntry.projectId,
+        milestoneId: editingEntry.milestoneId ? String(editingEntry.milestoneId) : '',
+        date: editingEntry.date,
+        billableHours: editingEntry.billableHours,
+        nonBillableHours: editingEntry.nonBillableHours,
+        billableDescription: editingEntry.billableDescription || editingEntry.description || '',
+        nonBillableDescription: editingEntry.nonBillableDescription || '',
+      }]);
+    }
+  }, [editingDateEntries, editingEntry]);
 
   // Guarantee every row has a stable unique rowId even if component was mounted before patch
   useEffect(() => {
@@ -297,7 +346,8 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
   };
 
   const handleAddRow = () => {
-    setRows((prev) => [...prev, createEmptyRow(today)]);
+    const activeDate = rows[0]?.date || activeEditDate || defaultDate || today;
+    setRows((prev) => [...prev, createEmptyRow(activeDate)]);
   };
 
   const handleRemoveRow = (rowId: string, rowIndex?: number) => {
@@ -319,6 +369,13 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
     value: FormRow[K],
     rowIndex?: number
   ) => {
+    // If setting date, synchronize across all task rows on the daily timesheet
+    if (field === 'date') {
+      const nextDate = String(value);
+      setRows((prev) => prev.map((r) => ({ ...r, date: nextDate })));
+      return;
+    }
+
     // If setting a milestone, prevent choosing one already selected in another row for the same project
     if (field === 'milestoneId' && value) {
       const targetRow = rows.find((r, i) => (r.rowId && rowId) ? r.rowId === rowId : i === rowIndex);
@@ -750,12 +807,29 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
         return;
       }
 
-      const targetProject = projects.find((p) => p.id === row.projectId);
-      const activeMilestones = (targetProject?.milestones || []).filter(
-        (m) => m.status !== 'achieved' || String(m.id) === String(row.milestoneId)
+      const targetProject = projects.find((p) => String(p.id) === String(row.projectId));
+      const configuredMilestones = targetProject?.milestones || [];
+      if (configuredMilestones.length === 0) {
+        onShowToast(
+          'Milestones Not Configured',
+          `Cannot submit timesheet: Project Manager has not yet configured milestones for project "${targetProject?.name || 'Selected Project'}".`,
+          'error'
+        );
+        return;
+      }
+      const activeMilestones = configuredMilestones.filter(
+        (m) => String(m.status).toLowerCase() !== 'achieved' || String(m.id) === String(row.milestoneId)
       );
-      if (activeMilestones.length > 0 && !row.milestoneId) {
-        onShowToast('Validation Error', `Please select a milestone for project "${targetProject?.name}".`, 'error');
+      if (activeMilestones.length === 0) {
+        onShowToast(
+          'All Milestones Achieved',
+          `Cannot submit timesheet: All milestones for project "${targetProject?.name || 'Selected Project'}" have already been achieved.`,
+          'error'
+        );
+        return;
+      }
+      if (!row.milestoneId) {
+        onShowToast('Milestone Required', `Please select a milestone for project "${targetProject?.name || 'Selected Project'}".`, 'error');
         return;
       }
 
@@ -796,7 +870,8 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
 
     // Build backend payloads — one per row
     const payloads: TimesheetCreatePayload[] = [];
-    for (const row of rows) {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
       const totalHours = Number(row.billableHours || 0) + Number(row.nonBillableHours || 0);
       if (totalHours === 0) continue;
 
@@ -820,13 +895,30 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
       }
 
       const targetProject = projects.find((p) => String(p.id) === String(row.projectId));
-      const activeMilestones = (targetProject?.milestones || []).filter(
-        (m) => m.status !== 'achieved' || String(m.id) === String(row.milestoneId)
-      );
-      if (activeMilestones.length > 0 && !row.milestoneId) {
+      const configuredMilestones = targetProject?.milestones || [];
+      if (configuredMilestones.length === 0) {
         onShowToast(
-          'Validation Error',
-          `Milestone selection is required for project "${targetProject?.name || 'Selected Project'}".`,
+          'Milestones Not Configured',
+          `Cannot submit timesheet: Project Manager has not yet configured milestones for project "${targetProject?.name || 'Selected Project'}".`,
+          'error'
+        );
+        return;
+      }
+      const activeMilestones = configuredMilestones.filter(
+        (m) => String(m.status).toLowerCase() !== 'achieved' || String(m.id) === String(row.milestoneId)
+      );
+      if (activeMilestones.length === 0) {
+        onShowToast(
+          'All Milestones Achieved',
+          `Cannot submit timesheet: All milestones for project "${targetProject?.name || 'Selected Project'}" have already been achieved.`,
+          'error'
+        );
+        return;
+      }
+      if (!row.milestoneId) {
+        onShowToast(
+          'Milestone Required',
+          `Milestone selection is mandatory for project "${targetProject?.name || 'Selected Project'}".`,
           'error'
         );
         return;
@@ -877,6 +969,23 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
       return;
     }
 
+    if (isDateEditMode && activeEditDate) {
+      try {
+        await syncDailyTimesheet({ date: activeEditDate, entries: payloads }).unwrap();
+        onShowToast(
+          'Timesheet Updated!',
+          `Updated daily timesheet for ${activeEditDate} (${grandTotal.toFixed(1)} hrs across ${payloads.length} task(s)).`,
+          'success'
+        );
+        if (onClearEditing) onClearEditing();
+        if (onNavigateTab) onNavigateTab('timesheets_history');
+      } catch (e: any) {
+        const msg = e?.data?.detail || e?.data?.message || 'Failed to update daily timesheet';
+        onShowToast('Error', msg, 'error');
+      }
+      return;
+    }
+
     try {
       await createTimesheets(payloads).unwrap();
       onShowToast(
@@ -906,12 +1015,28 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
         {/* Page Header (Compact, No Hero Banner) */}
         <div className="shrink-0 flex items-center justify-between gap-3 pb-1">
           <div className="space-y-0.5">
-            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 leading-tight">
-              {editingEntry ? 'Edit Timesheet Entry' : 'Submit Daily Timesheet'}
-            </h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 leading-tight">
+                {isEditing ? (isDateEditMode ? `Edit Daily Timesheet (${activeEditDate})` : 'Edit Timesheet Entry') : 'Submit Daily Timesheet'}
+              </h1>
+              {isEditing && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onClearEditing) onClearEditing();
+                    setRows([createEmptyRow(defaultDate || today, assignedProjects[0]?.id || '')]);
+                  }}
+                  className="text-xs text-slate-600 hover:text-slate-900 font-semibold px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Exit Edit Mode
+                </button>
+              )}
+            </div>
             <p className="text-xs text-slate-500">
-              {editingEntry
-                ? 'Update your daily logged work hours and project task descriptions.'
+              {isEditing
+                ? (isDateEditMode
+                    ? `Update all tasks, milestones, and hours logged for ${activeEditDate} across your assigned projects.`
+                    : 'Update your daily logged work hours and project task descriptions.')
                 : 'Log client billable deliverables and internal non-billable overhead.'}
             </p>
           </div>
@@ -1086,7 +1211,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
             </div>
 
             {/* Right: Add Project Row Button */}
-            {!editingEntry && (
+            {(!editingEntry || isDateEditMode) && (
               <button
                 type="button"
                 onClick={handleAddRow}
@@ -1116,7 +1241,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                     <select
                       value={row.projectId}
                       onChange={(e) => handleRowChange(row.rowId, 'projectId', e.target.value)}
-                      disabled={!!editingEntry}
+                      disabled={isSingleEntryEdit}
                       required
                       className="w-full h-8.5 bg-slate-100/80 hover:bg-white focus:bg-white border border-slate-300 text-slate-900 font-bold rounded-lg px-2.5 text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none disabled:opacity-60 cursor-pointer shadow-2xs transition-colors"
                     >
@@ -1144,23 +1269,27 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                             <span className="flex items-center gap-1.5">
                               <Layers className="w-3 h-3 text-primary" />
                               <span>Milestone</span>
-                              {hasConfigured && <span className="text-rose-500 font-bold">*</span>}
+                              <span className="text-rose-500 font-bold">*</span>
                             </span>
-                            {hasConfigured && (
+                            {hasConfigured ? (
                               <span className={`text-[8.5px] font-semibold px-1.5 py-0.2 rounded border ${
                                 availableCount > 0
-                                  ? 'text-primary bg-primary-subtle border-primary-subtle-border'
+                                   ? 'text-primary bg-primary-subtle border-primary-subtle-border'
                                   : 'text-amber-700 bg-amber-50 border-amber-200'
                               }`}>
                                 {availableCount} Available
                               </span>
-                            )}
+                            ) : row.projectId ? (
+                              <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded border text-rose-700 bg-rose-50 border-rose-200">
+                                None Configured (Required)
+                              </span>
+                            ) : null}
                           </label>
                           <select
                             value={row.milestoneId || ''}
                             onChange={(e) => handleRowChange(row.rowId, 'milestoneId', e.target.value, idx)}
-                            disabled={!!editingEntry || !row.projectId}
-                            required={hasConfigured}
+                            disabled={isSingleEntryEdit || !row.projectId}
+                            required
                             className="w-full h-8.5 bg-slate-100/80 hover:bg-white focus:bg-white border border-slate-300 text-slate-900 font-medium rounded-lg px-2.5 text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none disabled:opacity-60 cursor-pointer truncate shadow-2xs transition-colors"
                           >
                             <option value="">
@@ -1170,7 +1299,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                                   ? '-- Select Milestone --'
                                   : hasConfigured
                                     ? 'All Milestones Achieved or Selected'
-                                    : 'No Milestones Configured'}
+                                    : '⚠️ No Milestones Configured (Cannot submit)'}
                             </option>
                             {milestoneOptions.map((opt) => (
                               <option
@@ -1205,7 +1334,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                       min={effectiveMinAllowedDate}
                       max={today}
                       onChange={(e) => handleRowChange(row.rowId, 'date', e.target.value)}
-                      disabled={!!editingEntry}
+                      disabled={isEditing}
                       className="w-full h-8.5 bg-slate-100/80 hover:bg-white focus:bg-white border border-slate-300 text-slate-900 font-bold rounded-lg px-2.5 text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none disabled:opacity-60 cursor-pointer shadow-2xs transition-colors"
                     />
                   </div>
@@ -1366,7 +1495,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
 
           {/* Submit / Draft Action Buttons */}
           <div className={`shrink-0 pt-2 border-t border-slate-100 flex items-center justify-between ${!isSingleRow ? 'sticky bottom-0 z-20 bg-white/95 backdrop-blur-md pb-1 pt-2.5 rounded-b-xl shadow-xs' : ''}`}>
-            {!editingEntry ? (
+            {!isEditing ? (
               <button
                 type="button"
                 onClick={handleAddRow}
@@ -1380,6 +1509,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                 type="button"
                 onClick={() => {
                   if (onClearEditing) onClearEditing();
+                  setRows([createEmptyRow(defaultDate || today, assignedProjects[0]?.id || '')]);
                   onShowToast('Edit Cancelled', 'Returned to new submission mode', 'info');
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg font-bold cursor-pointer transition-colors"
@@ -1389,7 +1519,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
             )}
 
             <div className="flex items-center gap-3">
-              {!editingEntry && (
+              {!isEditing && (
                 <button
                   type="button"
                   onClick={() => {
@@ -1404,12 +1534,12 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
               )}
               <button
                 type="button"
-                disabled={isSubmitting || isWeekendSelected || !!matchedHoliday}
+                disabled={isSubmitting || isSyncing || isWeekendSelected || !!matchedHoliday}
                 onClick={() => handleSubmit()}
                 className="flex items-center gap-2 px-6 py-2 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-md shadow-indigo-500/20 text-xs font-extrabold transition-all hover:-translate-y-0.5 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 cursor-pointer"
               >
-                {isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                <span>{isSubmitting ? 'Saving...' : (editingEntry ? 'Update & Save' : 'Submit Timesheet')}</span>
+                {isSubmitting || isSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                <span>{isSubmitting || isSyncing ? 'Saving...' : (isEditing ? 'Update Daily Timesheet' : 'Submit Timesheet')}</span>
               </button>
             </div>
           </div>

@@ -38,7 +38,7 @@ class TimesheetService:
         assignment = await TimesheetValidator.validate_project_assignment(
             db, current_user.id, timesheet_in.project_assignment_id
         )
-        if timesheet_in.milestone_id and assignment:
+        if assignment:
             await TimesheetValidator.validate_milestone(
                 db, assignment.project_id, timesheet_in.milestone_id
             )
@@ -123,7 +123,7 @@ class TimesheetService:
             else:
                 assignment = assignments_cache[item.project_assignment_id]
 
-            if item.milestone_id and assignment:
+            if assignment:
                 await TimesheetValidator.validate_milestone(
                     db, assignment.project_id, item.milestone_id
                 )
@@ -382,3 +382,126 @@ class TimesheetService:
             total_weekly_hours=total_weekly_hours,
             daily_breakdowns=daily_breakdowns,
         )
+
+
+    @staticmethod
+    async def delete_daily_timesheet(
+        db: AsyncSession,
+        current_user: User,
+        target_date: date,
+    ) -> int:
+        entries = await TimesheetRepository.get_by_user_and_date(db, current_user.id, target_date)
+        if not entries:
+            raise NotFoundException(detail=f"No timesheet entries found for date {target_date}.")
+
+        for entry in entries:
+            if entry.status.lower() == "approved":
+                raise ForbiddenException(detail="Cannot delete timesheet: contains approved entries. Please contact your Project Manager.")
+
+        deleted_count = await TimesheetRepository.delete_by_user_and_date(db, current_user.id, target_date)
+        return deleted_count
+
+    @staticmethod
+    async def sync_daily_timesheet(
+        db: AsyncSession,
+        current_user: User,
+        target_date: date,
+        timesheets_in: List[TimesheetCreate],
+    ) -> List[Timesheet]:
+        """
+        Atomically synchronizes all timesheet entries for a user on target_date.
+        - Existing entries matching (project_assignment_id, milestone_id) are updated.
+        - New entries are inserted.
+        - Existing entries not present in timesheets_in are deleted.
+        """
+        if not timesheets_in:
+            await TimesheetService.delete_daily_timesheet(db, current_user, target_date)
+            return []
+
+        for item in timesheets_in:
+            item.timesheet_date = target_date
+
+        TimesheetValidator.validate_no_duplicate_milestones(timesheets_in)
+
+        TimesheetValidator.validate_not_before_joining_date(current_user.joining_date, target_date)
+        await TimesheetValidator.validate_submission_window(db, target_date)
+        TimesheetValidator.validate_not_weekend(target_date)
+        await TimesheetValidator.validate_not_holiday(db, target_date)
+
+        assignments_cache = {}
+        for item in timesheets_in:
+            if item.project_assignment_id not in assignments_cache:
+                assignment = await TimesheetValidator.validate_project_assignment(
+                    db, current_user.id, item.project_assignment_id
+                )
+                assignments_cache[item.project_assignment_id] = assignment
+            else:
+                assignment = assignments_cache[item.project_assignment_id]
+
+            if assignment:
+                await TimesheetValidator.validate_milestone(
+                    db, assignment.project_id, item.milestone_id
+                )
+
+        day_total_hours = sum(item.billable_hours + item.non_billable_hours for item in timesheets_in)
+        existing_entries = await TimesheetRepository.get_by_user_and_date(db, current_user.id, target_date)
+
+        for entry in existing_entries:
+            if entry.status.lower() == "approved":
+                raise ForbiddenException(detail="Cannot update timesheet: contains approved entries. Please contact your Project Manager.")
+
+        existing_ids = [e.id for e in existing_entries]
+
+        await TimesheetValidator.validate_daily_hours(
+            db,
+            current_user.id,
+            target_date,
+            day_total_hours,
+            exclude_ids=existing_ids,
+        )
+
+        await TimesheetValidator.validate_no_leave_conflict(
+            db,
+            current_user.id,
+            target_date,
+            day_total_hours,
+        )
+
+        existing_map = {
+            (e.project_assignment_id, e.milestone_id): e
+            for e in existing_entries
+        }
+
+        incoming_keys = set()
+        saved_instances = []
+
+        for item in timesheets_in:
+            key = (item.project_assignment_id, item.milestone_id)
+            incoming_keys.add(key)
+            existing = existing_map.get(key)
+            if existing:
+                existing.billable_hours = item.billable_hours
+                existing.billable_work_summary = item.billable_work_summary
+                existing.non_billable_hours = item.non_billable_hours
+                existing.non_billable_work_summary = item.non_billable_work_summary
+                saved_instances.append(existing)
+            else:
+                new_ts = Timesheet(
+                    user_id=current_user.id,
+                    project_assignment_id=item.project_assignment_id,
+                    milestone_id=item.milestone_id,
+                    timesheet_date=target_date,
+                    billable_hours=item.billable_hours,
+                    billable_work_summary=item.billable_work_summary,
+                    non_billable_hours=item.non_billable_hours,
+                    non_billable_work_summary=item.non_billable_work_summary,
+                )
+                db.add(new_ts)
+                saved_instances.append(new_ts)
+
+        for key, existing in existing_map.items():
+            if key not in incoming_keys:
+                await db.delete(existing)
+
+        await db.commit()
+        return await TimesheetRepository.get_by_user_and_date(db, current_user.id, target_date)

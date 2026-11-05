@@ -10,6 +10,7 @@ pm_only = require_roles("Project_Manager")
 from app.modules.users.model import User
 from app.modules.milestones.schema import MilestoneCreate, MilestoneUpdate, MilestoneResponse
 from app.modules.milestones.service import MilestoneService
+from app.modules.projects.service import invalidate_project_cache
 
 router = APIRouter()
 
@@ -20,6 +21,7 @@ async def create_milestone(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
+    invalidate_project_cache()
     service = MilestoneService(db)
     milestone = await service.create_milestone(milestone_in, current_user)
     return created_response(data=milestone.model_dump(mode="json"), message="Milestone created successfully")
@@ -54,6 +56,7 @@ async def update_milestone(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
+    invalidate_project_cache()
     service = MilestoneService(db)
     milestone = await service.update_milestone(milestone_id, milestone_in, current_user)
     return success_response(data=milestone.model_dump(mode="json"), message="Milestone updated successfully")
@@ -65,6 +68,7 @@ async def delete_milestone(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
+    invalidate_project_cache()
     service = MilestoneService(db)
     await service.delete_milestone(milestone_id, current_user)
     return success_response(data=None, message="Milestone deleted successfully")

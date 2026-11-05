@@ -178,3 +178,59 @@ async def delete_timesheet(
         data=None,
         message="Timesheet entry deleted successfully",
     )
+
+
+@router.delete("/date/{timesheet_date}", response_model=dict, summary="Delete all timesheets for a specific date")
+async def delete_daily_timesheet(
+    timesheet_date: date,
+    current_user: User = Depends(require_roles("Employee", "Project_Manager", "Admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    deleted_count = await TimesheetService.delete_daily_timesheet(db, current_user, timesheet_date)
+    return success_response(
+        data={"deleted_count": deleted_count, "date": str(timesheet_date)},
+        message=f"Successfully deleted {deleted_count} timesheet entries for {timesheet_date}",
+    )
+
+
+@router.put("/date/{timesheet_date}", response_model=dict, summary="Sync and update all timesheets for a specific date")
+async def sync_daily_timesheet(
+    timesheet_date: date,
+    timesheets_in: List[TimesheetCreate],
+    current_user: User = Depends(require_roles("Employee", "Project_Manager", "Admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    entries = await TimesheetService.sync_daily_timesheet(db, current_user, timesheet_date, timesheets_in)
+    items = []
+    for e in entries:
+        dump = TimesheetResponse.model_validate(e).model_dump(mode="json")
+        dump["user_name"] = e.user_name
+        dump["user_avatar"] = e.user_avatar
+        dump["project_name"] = e.project_name
+        dump["milestone_name"] = e.milestone_name
+        items.append(dump)
+    return success_response(
+        data=items,
+        message=f"Successfully synchronized timesheet for {timesheet_date}",
+    )
+
+
+@router.get("/date/{timesheet_date}", response_model=dict, summary="Get all timesheet entries for a specific date")
+async def get_daily_timesheet(
+    timesheet_date: date,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    entries = await TimesheetRepository.get_by_user_and_date(db, current_user.id, timesheet_date)
+    items = []
+    for e in entries:
+        dump = TimesheetResponse.model_validate(e).model_dump(mode="json")
+        dump["user_name"] = e.user_name
+        dump["user_avatar"] = e.user_avatar
+        dump["project_name"] = e.project_name
+        dump["milestone_name"] = e.milestone_name
+        items.append(dump)
+    return success_response(
+        data=items,
+        message=f"Retrieved {len(items)} timesheet entries for {timesheet_date}",
+    )

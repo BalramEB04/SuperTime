@@ -1,7 +1,7 @@
 import { Pagination } from '../common/Pagination';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { User, TimesheetEntry, Project, LeaveRequest, HolidayItem } from '../../types';
-import { useGetMyLeaveRequestsQuery, useGetWorkingCalendarQuery } from '../../store/api/dataApi';
+import { useGetMyLeaveRequestsQuery, useGetWorkingCalendarQuery, useDeleteDailyTimesheetMutation } from '../../store/api/dataApi';
 import {
   Calendar as CalendarIcon,
   ListFilter,
@@ -16,12 +16,24 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Filter,
   Info,
   CalendarX,
   Zap,
   ArrowRight,
+  Layers,
+  Briefcase,
 } from 'lucide-react';
+
+export interface DailyTimesheetGroup {
+  date: string;
+  totalHours: number;
+  totalBillable: number;
+  totalNonBillable: number;
+  status: string;
+  entries: TimesheetEntry[];
+}
 
 interface TimesheetsHistoryProps {
   currentUser: User;
@@ -29,8 +41,10 @@ interface TimesheetsHistoryProps {
   projects: Project[];
   holidays?: HolidayItem[];
   onDeleteTimesheet?: (id: string) => void;
+  onDeleteDailyTimesheet?: (date: string) => Promise<void> | void;
   onUpdateTimesheet?: (entry: TimesheetEntry) => void;
   onEditRequest?: (entry: TimesheetEntry) => void;
+  onEditDateRequest?: (date: string, entries: TimesheetEntry[]) => void;
   onSubmitTimesheets?: (entries: Omit<TimesheetEntry, 'id'>[]) => void;
   onNavigateToSubmit?: (date: string) => void;
   onNavigateToWeekendWork?: () => void;
@@ -43,14 +57,28 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
   projects,
   holidays = [],
   onDeleteTimesheet,
+  onDeleteDailyTimesheet,
   onUpdateTimesheet,
   onEditRequest,
+  onEditDateRequest,
   onSubmitTimesheets,
   onNavigateToSubmit,
   onNavigateToWeekendWork,
   onShowToast,
 }) => {
   const assignedProjects = (projects || []).filter((p) => p.assignedUserIds?.includes(currentUser.id));
+
+  const [deleteDailyTimesheetMutation, { isLoading: isDeletingDay }] = useDeleteDailyTimesheetMutation();
+  const [confirmDeleteDate, setConfirmDeleteDate] = useState<string | null>(null);
+  const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
+  const toggleExpandDate = (date: string) => {
+    setExpandedDates((prev) => {
+      const n = new Set(prev);
+      if (n.has(date)) n.delete(date);
+      else n.add(date);
+      return n;
+    });
+  };
 
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
   const [selectedDateModal, setSelectedDateModal] = useState<string | null>(null);
@@ -168,7 +196,44 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
     return true;
   });
 
+  const groupedDailyTimesheets = useMemo(() => {
+    const map = new Map<string, DailyTimesheetGroup>();
+    for (const ts of filteredTimesheets) {
+      const existing = map.get(ts.date);
+      if (existing) {
+        existing.totalHours += (ts.billableHours + ts.nonBillableHours);
+        existing.totalBillable += ts.billableHours;
+        existing.totalNonBillable += ts.nonBillableHours;
+        existing.entries.push(ts);
+        if (ts.status === 'rejected') existing.status = 'rejected';
+        else if (ts.status === 'pending' && existing.status !== 'rejected') existing.status = 'pending';
+      } else {
+        map.set(ts.date, {
+          date: ts.date,
+          totalHours: ts.billableHours + ts.nonBillableHours,
+          totalBillable: ts.billableHours,
+          totalNonBillable: ts.nonBillableHours,
+          status: ts.status,
+          entries: [ts],
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.date.localeCompare(a.date));
+  }, [filteredTimesheets]);
+
+  const paginatedDailyTimesheets = useMemo(() => {
+    return groupedDailyTimesheets.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  }, [groupedDailyTimesheets, currentPage, itemsPerPage]);
+
   const paginatedTimesheets = filteredTimesheets.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  const handleStartEditDay = (date: string, dayEntries: TimesheetEntry[]) => {
+    if (onEditDateRequest) {
+      onEditDateRequest(date, dayEntries);
+    } else if (onEditRequest && dayEntries.length > 0) {
+      onEditRequest(dayEntries[0]);
+    }
+  };
 
   const handleExportCSV = () => {
     const headers = 'ID,Date,Project,Category,Hours,Billable,Status,BillableDescription,NonBillableDescription\n';
@@ -578,7 +643,7 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
             </select>
 
             <div className="text-right flex items-center justify-end text-xs text-slate-500 font-extrabold">
-              Total Found: <span className="ml-1 text-slate-950 font-black">{filteredTimesheets.length} entries</span>
+              Total Found: <span className="ml-1 text-slate-950 font-black">{groupedDailyTimesheets.length} days ({filteredTimesheets.length} tasks)</span>
             </div>
           </div>
 
@@ -588,9 +653,9 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
               <thead className="sticky top-0 z-10 bg-slate-100/95 backdrop-blur-xs">
                 <tr className="border-b border-slate-200 text-slate-600 uppercase tracking-wider text-[9.5px] font-black">
                   <th className="py-2.5 px-3">Date</th>
-                  <th className="py-2.5 px-3">Project</th>
-                  <th className="py-2.5 px-3">Billable Work</th>
-                  <th className="py-2.5 px-3">Non-Billable Work</th>
+                  <th className="py-2.5 px-3">Logged Projects & Milestones</th>
+                  <th className="py-2.5 px-3">Primary Task Summary</th>
+                  <th className="py-2.5 px-3">Non-Billable Summary</th>
                   <th className="py-2.5 px-3 text-right">Hours (Billable)</th>
                   <th className="py-2.5 px-3 text-center">Status</th>
                   <th className="py-2.5 px-3 text-right">Actions</th>
@@ -628,60 +693,123 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
                       <td className="py-3 px-3 text-right text-slate-400 text-[10px] italic">—</td>
                     </tr>
                   ))}
-                {paginatedTimesheets.map((ts) => (
-                  <tr key={ts.id} className="hover:bg-indigo-50/30 transition-colors">
-                    <td className="py-3 px-3 font-extrabold text-slate-900 whitespace-nowrap">{ts.date}</td>
-                    <td className="py-3 px-3">
-                      <span className="w-fit rounded-full border border-indigo-200/60 bg-gradient-to-r from-indigo-50 to-violet-50 px-2.5 py-0.5 text-[9px] font-extrabold text-indigo-700 inline-block">
-                        {ts.projectName}
-                      </span>
-                      {ts.milestoneName && (
-                        <div className="text-[10px] text-slate-500 font-semibold mt-0.5">
-                          🎯 {ts.milestoneName}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3 px-3 text-slate-800 max-w-xs font-medium">
-                      {ts.billableDescription || ts.description}
-                    </td>
-                    <td className="py-3 px-3 text-slate-500 max-w-xs italic text-[11px]">
-                      {ts.nonBillableDescription || 'N/A'}
-                    </td>
-                    <td className="py-3 px-3 text-right font-black text-slate-900 whitespace-nowrap">
-                      {ts.billableHours + ts.nonBillableHours}h <span className="ml-1 rounded-md border border-emerald-200/50 bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">({ts.billableHours}h billable)</span>
-                    </td>
-                    <td className="py-3 px-3 text-center">
-                      <span
-                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-extrabold capitalize border border-emerald-200/60 bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-700"
-                      >
-                        {ts.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleStartEdit(ts)}
-                          className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 transition-colors cursor-pointer"
-                          title="Edit timesheet entry"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onDeleteTimesheet(ts.id);
-                            onShowToast('Deleted Entry', 'Timesheet entry removed.', 'info');
-                          }}
-                          className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors cursor-pointer"
-                          title="Delete log"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {paginatedDailyTimesheets.map((group) => {
+                  const isExpanded = expandedDates.has(group.date);
+                  const hasMultiple = group.entries.length > 1;
+                  return (
+                    <React.Fragment key={group.date}>
+                      <tr className="hover:bg-indigo-50/30 transition-colors border-b border-slate-100">
+                        <td className="py-3 px-3 font-extrabold text-slate-900 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            {hasMultiple && (
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandDate(group.date)}
+                                className="p-1 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-200 cursor-pointer transition-colors"
+                                title={isExpanded ? 'Collapse task details' : 'Expand task details'}
+                              >
+                                {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                              </button>
+                            )}
+                            <span>{group.date}</span>
+                            {hasMultiple && (
+                              <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded-full">
+                                {group.entries.length} tasks
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className="flex flex-wrap gap-1.5 items-center">
+                            {group.entries.map((ts, idx) => (
+                              <span
+                                key={ts.id || idx}
+                                className="inline-flex items-center gap-1 rounded-md border border-indigo-200/80 bg-indigo-50/70 px-2 py-0.5 text-[9px] font-bold text-indigo-800"
+                              >
+                                <span>{ts.projectName}</span>
+                                {ts.milestoneName && (
+                                  <span className="text-indigo-600 font-semibold">• {ts.milestoneName}</span>
+                                )}
+                                <span className="text-slate-500 font-normal">({(ts.billableHours + ts.nonBillableHours)}h)</span>
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 text-slate-800 max-w-xs font-medium truncate">
+                          {group.entries[0]?.billableDescription || group.entries[0]?.description}
+                        </td>
+                        <td className="py-3 px-3 text-slate-500 max-w-xs italic text-[11px] truncate">
+                          {group.entries[0]?.nonBillableDescription || 'N/A'}
+                        </td>
+                        <td className="py-3 px-3 text-right font-black text-slate-900 whitespace-nowrap">
+                          {group.totalHours.toFixed(1)}h <span className="ml-1 rounded-md border border-emerald-200/50 bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">({group.totalBillable.toFixed(1)}h billable)</span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span
+                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-extrabold capitalize border border-emerald-200/60 bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-700"
+                          >
+                            {group.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditDay(group.date, group.entries)}
+                              className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 transition-colors cursor-pointer"
+                              title="Edit Daily Timesheet (All Projects & Milestones)"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteDate(group.date)}
+                              className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors cursor-pointer"
+                              title="Delete Daily Timesheet (All Projects & Milestones)"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {/* Expanded child tasks breakdown */}
+                      {isExpanded && group.entries.map((ts, idx) => (
+                        <tr key={`child-${ts.id || idx}`} className="bg-slate-50/70 text-[11px] border-b border-slate-100/80">
+                          <td className="py-2 px-3 pl-8 text-slate-400 italic">
+                            Task #{idx + 1}
+                          </td>
+                          <td className="py-2 px-3">
+                            <span className="font-bold text-slate-700">{ts.projectName}</span>
+                            {ts.milestoneName && (
+                              <span className="text-slate-500 text-[10px] block">🎯 {ts.milestoneName}</span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-slate-700 max-w-xs font-medium">
+                            <span className="text-[10px] text-emerald-700 font-bold">Billable: </span>
+                            {ts.billableDescription || ts.description}
+                          </td>
+                          <td className="py-2 px-3 text-slate-500 max-w-xs italic text-[10.5px]">
+                            {ts.nonBillableDescription ? (
+                              <>
+                                <span className="text-[10px] text-slate-600 font-bold">Non-Bill: </span>
+                                {ts.nonBillableDescription}
+                              </>
+                            ) : '—'}
+                          </td>
+                          <td className="py-2 px-3 text-right font-bold text-slate-700">
+                            {(ts.billableHours + ts.nonBillableHours).toFixed(1)}h ({ts.billableHours.toFixed(1)}h)
+                          </td>
+                          <td className="py-2 px-3 text-center text-slate-500 text-[10px]">
+                            {ts.category}
+                          </td>
+                          <td className="py-2 px-3 text-right text-slate-400 italic text-[10px]">
+                            —
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -690,7 +818,7 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
           <div className="shrink-0 pt-2 border-t border-slate-100">
             <Pagination
               currentPage={currentPage}
-              totalItems={filteredTimesheets.length}
+              totalItems={groupedDailyTimesheets.length}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
@@ -707,19 +835,22 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">
-                  {modalEntries.length === 0 && selectedDateModal && (
+                  {modalEntries.length === 0 && selectedDateModal ? (
                     Boolean(employeeJoinDate && selectedDateModal < employeeJoinDate)
                       ? `Pre-Joining • ${selectedDateModal}`
                       : selectedDateModal < minAllowedDate
                         ? `Expired Timesheet • ${selectedDateModal}`
                         : `Timesheet Logs • ${selectedDateModal}`
+                  ) : (
+                    `Timesheet Logs • ${selectedDateModal}`
                   )}
                 </h3>
                 <p className="text-xs text-slate-500">
                   Total Logged:{' '}
                   <span className="font-extrabold text-blue-600">
-                    {modalEntries.reduce((sum, e) => sum + (e.billableHours + e.nonBillableHours), 0)} Hours
-                  </span>
+                    {modalEntries.reduce((sum, e) => sum + (e.billableHours + e.nonBillableHours), 0).toFixed(1)} Hours
+                  </span>{' '}
+                  {modalEntries.length > 0 && `across ${modalEntries.length} task${modalEntries.length > 1 ? 's' : ''}`}
                 </p>
               </div>
               <button
@@ -730,6 +861,44 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {modalEntries.length > 0 && (
+              <div className="p-3 bg-gradient-to-r from-indigo-50/90 to-blue-50/90 border border-indigo-200/90 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-700">Consolidated Daily Actions</span>
+                  <p className="text-xs font-bold text-slate-800">
+                    {modalEntries.length} project & milestone task(s) logged
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = selectedDateModal;
+                      const entries = modalEntries;
+                      setSelectedDateModal(null);
+                      handleStartEditDay(d, entries);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs cursor-pointer transition-colors"
+                    title="Edit all projects & milestones for this date in a single form"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>Edit Daily Timesheet</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmDeleteDate(selectedDateModal);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs border border-rose-200 cursor-pointer transition-colors"
+                    title="Delete all entries for this date"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Day</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
               {modalEntries.length === 0 ? (() => {
@@ -892,61 +1061,17 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
                       <span className="text-[10px] text-slate-600 font-bold bg-slate-200 px-2 py-0.5 rounded">
                         {entry.category}
                       </span>
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedDateModal(null);
-                            handleStartEdit(entry);
-                          }}
-                          className="text-[11px] text-blue-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span>Edit & Update</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onDeleteTimesheet(entry.id);
-                            onShowToast('Removed', 'Log entry deleted.', 'info');
-                          }}
-                          className="text-[11px] text-rose-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Delete</span>
-                        </button>
-                      </div>
                     </div>
                   </div>
                 ))
               )}
             </div>
 
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-              {modalEntries.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const dateToLog = selectedDateModal;
-                    setSelectedDateModal(null);
-                    if (dateToLog) {
-                      if (onNavigateToSubmit) {
-                        onNavigateToSubmit(dateToLog);
-                      } else {
-                        handleStartAddForDate(dateToLog);
-                      }
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold text-xs transition-colors cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>+ Add Another Entry</span>
-                </button>
-              )}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-end">
               <button
                 type="button"
                 onClick={() => setSelectedDateModal(null)}
-                className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs cursor-pointer ml-auto"
+                className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs cursor-pointer"
               >
                 Close
               </button>
@@ -1100,6 +1225,51 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* DELETE DAILY TIMESHEET CONFIRMATION MODAL */}
+      {confirmDeleteDate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <AlertCircle className="w-6 h-6 shrink-0" />
+              <h3 className="text-base font-bold text-slate-900">Delete Daily Timesheet?</h3>
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to delete all logged timesheet entries for <strong>{confirmDeleteDate}</strong>? This action will remove all logged hours across your projects and milestones for this date.
+            </p>
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteDate(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingDay}
+                onClick={async () => {
+                  if (!confirmDeleteDate) return;
+                  try {
+                    if (onDeleteDailyTimesheet) {
+                      await onDeleteDailyTimesheet(confirmDeleteDate);
+                    } else {
+                      await deleteDailyTimesheetMutation(confirmDeleteDate).unwrap();
+                    }
+                    onShowToast('Timesheet Deleted', `All entries for ${confirmDeleteDate} removed successfully.`, 'success');
+                    setConfirmDeleteDate(null);
+                    setSelectedDateModal(null);
+                  } catch (e: any) {
+                    onShowToast('Delete Failed', e?.data?.detail || e?.data?.message || 'Could not delete timesheet.', 'error');
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-600/20 disabled:opacity-50 cursor-pointer"
+              >
+                {isDeletingDay ? 'Deleting...' : 'Delete Daily Timesheet'}
+              </button>
+            </div>
           </div>
         </div>
       )}

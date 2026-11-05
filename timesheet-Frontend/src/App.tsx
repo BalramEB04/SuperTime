@@ -23,6 +23,8 @@ import {
   useCreateTimesheetsMutation,
   useUpdateTimesheetMutation,
   useDeleteTimesheetMutation,
+  useDeleteDailyTimesheetMutation,
+  useSyncDailyTimesheetMutation,
   useCreateLeaveRequestMutation,
   useApproveLeaveRequestMutation,
   useRejectLeaveRequestMutation,
@@ -394,6 +396,7 @@ export default function App() {
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [editingTimesheet, setEditingTimesheet] = useState<TimesheetEntry | null>(null);
+  const [editingDateEntries, setEditingDateEntries] = useState<TimesheetEntry[] | null>(null);
   const [defaultSubmitDate, setDefaultSubmitDate] = useState<string | null>(null);
   const [openMarkLeaveModal, setOpenMarkLeaveModal] = useState(false);
 
@@ -466,6 +469,7 @@ export default function App() {
   const [createTimesheets] = useCreateTimesheetsMutation();
   const [updateTimesheetApi] = useUpdateTimesheetMutation();
   const [deleteTimesheetApi] = useDeleteTimesheetMutation();
+  const [deleteDailyTimesheetApi] = useDeleteDailyTimesheetMutation();
   const [createLeaveRequest] = useCreateLeaveRequestMutation();
   const [approveLeaveRequest] = useApproveLeaveRequestMutation();
   const [rejectLeaveRequest] = useRejectLeaveRequestMutation();
@@ -553,6 +557,15 @@ export default function App() {
       showToast('Action Failed', getErrorMessage(e, 'Failed to delete timesheet'), 'error');
     }
   }, [deleteTimesheetApi, showToast]);
+
+  const handleDeleteDailyTimesheet = React.useCallback(async (date: string) => {
+    try {
+      await deleteDailyTimesheetApi(date).unwrap();
+      showToast('Success', `Timesheet for ${date} deleted successfully`, 'success');
+    } catch (e: any) {
+      showToast('Action Failed', getErrorMessage(e, 'Failed to delete daily timesheet'), 'error');
+    }
+  }, [deleteDailyTimesheetApi, showToast]);
 
   const handleUpdateTimesheet = React.useCallback(async (updatedEntry: TimesheetEntry) => {
     try {
@@ -1069,10 +1082,14 @@ export default function App() {
                   onSubmitTimesheet={handleTimesheetSubmit}
                   onUpdateTimesheet={handleUpdateTimesheet}
                   editingEntry={editingTimesheet}
+                  editingDateEntries={editingDateEntries}
                   defaultDate={defaultSubmitDate}
                   initialOpenMarkLeave={openMarkLeaveModal}
                   onCloseMarkLeaveModal={() => setOpenMarkLeaveModal(false)}
-                  onClearEditing={() => setEditingTimesheet(null)}
+                  onClearEditing={() => {
+                    setEditingTimesheet(null);
+                    setEditingDateEntries(null);
+                  }}
                   onShowToast={showToast}
                 />
               )}
@@ -1084,10 +1101,17 @@ export default function App() {
                   projects={projects}
                   holidays={holidays || []}
                   onDeleteTimesheet={handleDeleteTimesheet}
+                  onDeleteDailyTimesheet={handleDeleteDailyTimesheet}
                   onUpdateTimesheet={handleUpdateTimesheet}
                   onSubmitTimesheets={handleTimesheetSubmit}
                   onEditRequest={(entry) => {
                     setEditingTimesheet(entry);
+                    setEditingDateEntries(null);
+                    setActiveEmployeeTab('submit_timesheet');
+                  }}
+                  onEditDateRequest={(date, entries) => {
+                    setEditingDateEntries(entries);
+                    setEditingTimesheet(null);
                     setActiveEmployeeTab('submit_timesheet');
                   }}
                   onNavigateToSubmit={(date) => {
@@ -1192,10 +1216,14 @@ export default function App() {
                   onSubmitTimesheet={handleTimesheetSubmit}
                   onUpdateTimesheet={handleUpdateTimesheet}
                   editingEntry={editingTimesheet}
+                  editingDateEntries={editingDateEntries}
                   defaultDate={defaultSubmitDate}
                   initialOpenMarkLeave={false}
                   onCloseMarkLeaveModal={() => { }}
-                  onClearEditing={() => setEditingTimesheet(null)}
+                  onClearEditing={() => {
+                    setEditingTimesheet(null);
+                    setEditingDateEntries(null);
+                  }}
                   onShowToast={showToast}
                 />
               )}
@@ -1208,10 +1236,17 @@ export default function App() {
                   projects={projects}
                   holidays={holidays || []}
                   onDeleteTimesheet={handleDeleteTimesheet}
+                  onDeleteDailyTimesheet={handleDeleteDailyTimesheet}
                   onUpdateTimesheet={handleUpdateTimesheet}
                   onSubmitTimesheets={handleTimesheetSubmit}
                   onEditRequest={(entry) => {
                     setEditingTimesheet(entry);
+                    setEditingDateEntries(null);
+                    setActivePmTab('pm_submit_timesheet');
+                  }}
+                  onEditDateRequest={(date, entries) => {
+                    setEditingDateEntries(entries);
+                    setEditingTimesheet(null);
                     setActivePmTab('pm_submit_timesheet');
                   }}
                   onNavigateToSubmit={(date) => {
