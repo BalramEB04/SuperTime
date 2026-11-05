@@ -102,7 +102,7 @@ export const TimesheetsHistory: React.FC<TimesheetsHistoryProps> = ({
   const maxPastDays = Math.max(1, Math.ceil(lockHours / 24));
   const minDateObj = new Date();
   minDateObj.setDate(minDateObj.getDate() - maxPastDays);
-  const minAllowedDate = minDateObj.toISOString().split('T')[0];
+  const minAllowedDate = `${minDateObj.getFullYear()}-${String(minDateObj.getMonth() + 1).padStart(2, '0')}-${String(minDateObj.getDate()).padStart(2, '0')}`;
 
   const employeeJoinDate = currentUser.joinDate || (currentUser as any).joining_date || '';
 

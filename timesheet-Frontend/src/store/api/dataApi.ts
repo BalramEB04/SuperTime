@@ -714,7 +714,7 @@ export const dataApi = apiSlice.injectEndpoints({
     }),
 
     getUsers: builder.query<User[], void>({
-      query: () => '/users',
+      query: () => '/users?limit=300',
       transformResponse: (res: any) => {
         const items = res.data?.items || res.data || [];
         return items.map(mapBackendUserToFrontendUser);

@@ -17,24 +17,16 @@ import app.core.models  # noqa: F401
 from app.api.router import api_router
 from app.common.responses import error_response
 from app.core.config import settings
-from app.scheduler.scheduler import start_scheduler, shutdown_scheduler, ping_database_keepalive
+# Background scheduler removed per configuration
+# from app.scheduler.scheduler import ...
 
 logger = logging.getLogger("app.main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    is_serverless = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
-    if not is_serverless:
-        # Pre-warm connection pool on startup for persistent servers
-        try:
-            await ping_database_keepalive()
-        except Exception as e:
-            logger.warning(f"Initial DB keepalive warm-up failed: {e}")
-        start_scheduler()
+    # Background scheduler disabled/removed
     yield
-    if not is_serverless:
-        shutdown_scheduler()
 
 
 app = FastAPI(

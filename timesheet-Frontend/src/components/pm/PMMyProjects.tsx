@@ -14,6 +14,7 @@ import {
   useUpdateMilestoneMutation,
   useDeleteMilestoneMutation,
   useGetToolsQuery,
+  useGetUsersQuery,
   useUploadProjectDocumentMutation,
   useDeleteProjectDocumentMutation,
 } from '../../store/api/dataApi';
@@ -113,6 +114,8 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
 
   // Master Tools Query
   const { data: masterTools = [] } = useGetToolsQuery();
+  const { data: fetchedUsers = [] } = useGetUsersQuery();
+  const resolvedUsers = React.useMemo(() => (fetchedUsers.length > 0 ? fetchedUsers : allUsers), [fetchedUsers, allUsers]);
 
   // Milestone Mutations
   const [createMilestone] = useCreateMilestoneMutation();
@@ -487,7 +490,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
   const handleAssignUser = () => {
     if (!selectedProject || !selectedUserId) return;
     onAssignUserToProject(selectedProject.id, selectedUserId);
-    const assignedUser = allUsers.find((u) => String(u.id) === String(selectedUserId));
+    const assignedUser = resolvedUsers.find((u) => String(u.id) === String(selectedUserId));
     onShowToast('Employee Assigned', `Assigned ${assignedUser?.name || 'user'} to ${selectedProject.name}`, 'success');
     setShowAssignModal(false);
     setSelectedUserId('');
@@ -503,7 +506,7 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
   const handleRemoveUser = (userId: string) => {
     if (!selectedProject) return;
     onRemoveUserFromProject(selectedProject.id, userId);
-    const removedUser = allUsers.find((u) => String(u.id) === String(userId));
+    const removedUser = resolvedUsers.find((u) => String(u.id) === String(userId));
     onShowToast('Employee Removed', `Removed ${removedUser?.name || 'user'} from ${selectedProject.name}`, 'info');
 
     const updated = {
@@ -1185,44 +1188,87 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                       <h3 className="font-extrabold text-slate-900 text-sm">Assigned Employees</h3>
                       <p className="text-slate-500 text-[11px]">Team members working on this project</p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAssignModal(true)}
+                      className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Assign Employee</span>
+                    </button>
                   </div>
 
-                  <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden bg-white">
-                    {(selectedProject.assignedUserIds || []).map((userId) => {
-                      const userObj = allUsers.find((u) => String(u.id) === String(userId));
-                      if (!userObj) return null;
+                  {(() => {
+                    const assignedIds = (selectedProject.assignedUserIds && selectedProject.assignedUserIds.length > 0)
+                      ? selectedProject.assignedUserIds
+                      : ((selectedProject as any).assigned_user_ids || []);
 
+                    if (assignedIds.length === 0) {
                       return (
-                        <div key={String(userId)} className="p-3.5 flex items-center justify-between hover:bg-slate-50">
-                          <div className="flex items-center gap-3">
-                            <img
-                              src={userObj.avatar}
-                              alt={userObj.name}
-                              className="w-9 h-9 rounded-full object-cover ring-2 ring-blue-500/20"
-                            />
-                            <div>
-                              <p className="font-bold text-slate-900 text-xs">{userObj.name}</p>
-                              <p className="text-[10px] text-slate-500 font-medium">
-                                {userObj.title} • {userObj.department}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-4">
-                            {String(userId) !== String(currentUser.id) && (
-                              <button
-                                onClick={() => handleRemoveUser(userId)}
-                                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50"
-                                title="Remove employee from project"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
+                        <div className="p-8 text-center text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                          <Users className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                          <p className="font-bold text-slate-700">No employees assigned to this project yet.</p>
+                          <p className="text-xs text-slate-500 mt-1">Click &quot;Assign Employee&quot; above to allocate team members.</p>
                         </div>
                       );
-                    })}
-                  </div>
+                    }
+
+                    return (
+                      <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden bg-white shadow-2xs">
+                        {assignedIds.map((userId: any) => {
+                          const uIdStr = String(userId);
+                          const userObj = resolvedUsers.find((u) => String(u.id) === uIdStr);
+                          // Only show Active employees to the PM
+                          if (userObj && userObj.status && userObj.status.toLowerCase() !== 'active') {
+                            return null;
+                          }
+                          const isCurrent = currentUser && String(currentUser.id) === uIdStr;
+                          const name = userObj?.name || (isCurrent ? currentUser.name : `Employee #${uIdStr}`);
+                          const title = userObj?.title || (isCurrent ? currentUser.title : 'Employee');
+                          const department = userObj?.department || (isCurrent ? currentUser.department : 'Delivery');
+                          const avatar = userObj?.avatar || (isCurrent ? currentUser.avatar : undefined) || 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80';
+
+                          return (
+                            <div key={uIdStr} className="p-3.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                              <div className="flex items-center gap-3">
+                                <img
+                                  src={avatar}
+                                  alt={name}
+                                  className="w-9 h-9 rounded-full object-cover ring-2 ring-blue-500/20"
+                                />
+                                <div>
+                                  <p className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                                    <span>{name}</span>
+                                    {isCurrent && (
+                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                        You (PM)
+                                      </span>
+                                    )}
+                                  </p>
+                                  <p className="text-[10px] text-slate-500 font-medium">
+                                    {title} &bull; {department}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {uIdStr !== String(currentUser.id) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveUser(uIdStr)}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors cursor-pointer"
+                                    title={`Deallocate ${name} from this project`}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -1951,10 +1997,10 @@ export const PMMyProjects: React.FC<PMMyProjectsProps> = ({
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 font-medium"
               >
                 <option value="">-- Select an employee --</option>
-                {allUsers
-                  .filter((u) => u.role === 'employee')
-                  .filter((u) => u.status === 'active')
-                  .filter((u) => !(selectedProject.assignedUserIds || []).map(String).includes(String(u.id)))
+                {resolvedUsers
+                  .filter((u) => u.role === 'employee' || u.role === 'pm')
+                  .filter((u) => u.status?.toLowerCase() === 'active')
+                  .filter((u) => !(selectedProject.assignedUserIds || (selectedProject as any).assigned_user_ids || []).map(String).includes(String(u.id)))
                   .map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.name} ({u.title} • {u.department})

@@ -2,7 +2,7 @@ import { Pagination } from '../common/Pagination';
 import React, { useState, useEffect } from 'react';
 import { Project, User, ProjectTool, MasterTool } from '../../types';
 import { formatINR } from '../../utils/formatters';
-import { useGetUpcomingLeavesQuery, useGetToolsQuery, useBatchAssignUsersToProjectsMutation } from '../../store/api/dataApi';
+import { useGetUpcomingLeavesQuery, useGetToolsQuery, useBatchAssignUsersToProjectsMutation, useGetUsersQuery } from '../../store/api/dataApi';
 import {
   Users,
   Wrench,
@@ -22,7 +22,457 @@ import {
   Calendar,
   X,
   Layers2,
+  ChevronLeft,
+  ChevronRight,
+  Sliders,
+  Building2,
+  Clock,
+  ArrowRight,
 } from 'lucide-react';
+
+interface ProjectAllocationSummary {
+  id: string;
+  name: string;
+  code: string;
+  client?: string;
+  status?: string;
+  startDate?: string;
+  endDate?: string;
+  budget?: number;
+  loggedHours?: number;
+  billableHours?: number;
+  milestonesCount?: number;
+  description?: string;
+  pmName?: string;
+}
+
+interface EmployeeAllocationRecord {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userAvatar?: string;
+  userTitle: string;
+  userDept: string;
+  leaveStatus?: string;
+  projects: ProjectAllocationSummary[];
+}
+
+const EmployeeProjectCellSlider: React.FC<{
+  projects: ProjectAllocationSummary[];
+  onOpenSlider: () => void;
+  onDeallocate?: (projectId: string) => void;
+}> = ({ projects, onOpenSlider, onDeallocate }) => {
+  const [index, setIndex] = useState(0);
+
+  if (!projects || projects.length === 0) {
+    return <span className="text-slate-400 italic text-[11px]">No active projects</span>;
+  }
+
+  if (projects.length === 1) {
+    const proj = projects[0];
+    return (
+      <div className="inline-flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onOpenSlider}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-slate-50 border-slate-200 text-slate-800 text-[11px] font-medium hover:bg-indigo-50/70 hover:border-indigo-300 hover:text-indigo-900 transition-all text-left cursor-pointer group shadow-2xs"
+          title={`Click to view details for ${proj.name}`}
+        >
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+            {proj.code}
+          </span>
+          <span className="font-bold text-slate-900 truncate max-w-[170px]" title={proj.name}>
+            {proj.name}
+          </span>
+        </button>
+        {onDeallocate && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDeallocate(proj.id);
+            }}
+            className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+            title={`Deallocate from ${proj.name}`}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const safeIndex = index >= projects.length ? 0 : index;
+  const activeProj = projects[safeIndex];
+
+  const handlePrev = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIndex((prev) => (prev > 0 ? prev - 1 : projects.length - 1));
+  };
+
+  const handleNext = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIndex((prev) => (prev < projects.length - 1 ? prev + 1 : 0));
+  };
+
+  return (
+    <div className="inline-flex items-center gap-1.5 bg-slate-50/90 border border-slate-200 p-1 rounded-xl shadow-2xs">
+      <button
+        type="button"
+        onClick={handlePrev}
+        className="w-5 h-5 rounded-md bg-white border border-slate-200 hover:bg-indigo-50 hover:border-indigo-300 text-slate-600 hover:text-indigo-600 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+        title="Previous project"
+      >
+        <ChevronLeft className="w-3 h-3" />
+      </button>
+
+      <button
+        type="button"
+        onClick={onOpenSlider}
+        className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-800 text-[11px] font-medium hover:bg-indigo-50/70 hover:border-indigo-300 transition-all text-left cursor-pointer group max-w-[190px]"
+        title={`Click to view all projects (${safeIndex + 1} of ${projects.length})`}
+      >
+        <span className="px-1.5 py-0.2 text-[9px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+          {activeProj.code}
+        </span>
+        <span className="font-bold text-slate-900 truncate max-w-[120px]" title={activeProj.name}>
+          {activeProj.name}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        onClick={handleNext}
+        className="w-5 h-5 rounded-md bg-white border border-slate-200 hover:bg-indigo-50 hover:border-indigo-300 text-slate-600 hover:text-indigo-600 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+        title="Next project"
+      >
+        <ChevronRight className="w-3 h-3" />
+      </button>
+
+      <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold text-indigo-700 bg-indigo-50 border border-indigo-200/70 shrink-0">
+        {safeIndex + 1}/{projects.length}
+      </span>
+
+      {onDeallocate && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDeallocate(activeProj.id);
+          }}
+          className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer shrink-0 ml-0.5"
+          title={`Deallocate from ${activeProj.name}`}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+};
+
+const EmployeeProjectSliderDrawer: React.FC<{
+  employee: EmployeeAllocationRecord;
+  onClose: () => void;
+  onDeallocateProject?: (projectId: string) => void;
+}> = ({ employee, onClose, onDeallocateProject }) => {
+  const [activeProjectIdx, setActiveProjectIdx] = useState(0);
+
+  const projects = employee.projects || [];
+  const safeIdx = activeProjectIdx >= projects.length ? 0 : activeProjectIdx;
+  const currentProject = projects[safeIdx] || projects[0];
+
+  const handlePrev = () => {
+    setActiveProjectIdx((prev) => (prev > 0 ? prev - 1 : projects.length - 1));
+  };
+
+  const handleNext = () => {
+    setActiveProjectIdx((prev) => (prev < projects.length - 1 ? prev + 1 : 0));
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-hidden">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity"
+        onClick={onClose}
+      />
+
+      <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
+        <div className="w-screen max-w-md bg-white shadow-2xl flex flex-col border-l border-slate-200">
+          {/* Header */}
+          <div className="p-5 border-b border-slate-200 bg-slate-50/80 flex items-start justify-between gap-4">
+            <div className="flex items-center gap-3">
+              {employee.userAvatar ? (
+                <img
+                  src={employee.userAvatar}
+                  alt={employee.userName}
+                  className="w-12 h-12 rounded-full object-cover border-2 border-indigo-200 shrink-0 shadow-xs"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-extrabold text-lg border-2 border-indigo-200 shrink-0">
+                  {employee.userName.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  {employee.userName}
+                </h3>
+                <p className="text-xs text-slate-500 font-medium">{employee.userEmail}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200/80 text-slate-700">
+                    {employee.userTitle}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium">
+                    {employee.userDept}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors cursor-pointer"
+              title="Close panel"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Subheader bar */}
+          <div className="px-5 py-3 bg-indigo-50/50 border-b border-indigo-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-indigo-600" />
+              <span className="text-xs font-bold text-indigo-900">
+                Project Allocations Slider ({projects.length})
+              </span>
+            </div>
+            {employee.leaveStatus ? (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                <span>{employee.leaveStatus}</span>
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" />
+                <span>Active / Available</span>
+              </span>
+            )}
+          </div>
+
+          {/* Drawer Content */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-5">
+            {projects.length === 0 ? (
+              <div className="text-center py-16 text-slate-400 italic text-xs">
+                No projects assigned to this team member.
+              </div>
+            ) : (
+              <>
+                {/* Interactive Slider Card */}
+                <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-800 text-white rounded-2xl p-5 shadow-lg relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+
+                  {/* Slider Controls Bar */}
+                  <div className="flex items-center justify-between mb-4 pb-3 border-b border-white/10">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-200 flex items-center gap-1.5">
+                      <Sliders className="w-3.5 h-3.5 text-indigo-300" />
+                      Project Slider
+                    </span>
+
+                    {projects.length > 1 && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handlePrev}
+                          className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+                          title="Previous project"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <span className="text-xs font-bold text-indigo-200">
+                          {safeIdx + 1} / {projects.length}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleNext}
+                          className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+                          title="Next project"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Active Project Details */}
+                  {currentProject && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-0.5 rounded-md text-[10px] font-extrabold bg-indigo-500/30 text-indigo-200 border border-indigo-400/40">
+                          {currentProject.code}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-white border border-white/15">
+                          {currentProject.status || 'Active'}
+                        </span>
+                      </div>
+
+                      <h4 className="text-lg font-extrabold text-white leading-snug">
+                        {currentProject.name}
+                      </h4>
+
+                      {currentProject.client && (
+                        <p className="text-xs text-indigo-200/90 flex items-center gap-1.5 font-medium">
+                          <Building2 className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+                          <span>Client: <strong className="text-white">{currentProject.client}</strong></span>
+                        </p>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-2.5 pt-3 border-t border-white/10 text-xs text-indigo-100">
+                        {currentProject.startDate && (
+                          <div className="flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+                            <span>Start: <strong>{currentProject.startDate}</strong></span>
+                          </div>
+                        )}
+                        {currentProject.endDate && (
+                          <div className="flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+                            <span>End: <strong>{currentProject.endDate}</strong></span>
+                          </div>
+                        )}
+                        {currentProject.milestonesCount !== undefined && (
+                          <div className="flex items-center gap-1.5 col-span-2">
+                            <Layers className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+                            <span>{currentProject.milestonesCount} Milestones configured</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {onDeallocateProject && (
+                        <div className="pt-3 border-t border-white/10">
+                          <button
+                            type="button"
+                            onClick={() => onDeallocateProject(currentProject.id)}
+                            className="w-full py-2 px-3 rounded-xl bg-rose-500/25 hover:bg-rose-600 border border-rose-400/30 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer active:scale-98"
+                            title={`Deallocate ${employee.userName} from ${currentProject.name}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-200" />
+                            <span>Deallocate from {currentProject.code} - {currentProject.name}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Quick selector pills if multiple projects */}
+                {projects.length > 1 && (
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
+                      Jump to Project
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {projects.map((proj, idx) => (
+                        <button
+                          key={proj.id}
+                          type="button"
+                          onClick={() => setActiveProjectIdx(idx)}
+                          className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                            safeIdx === idx
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                              : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-extrabold ${
+                            safeIdx === idx ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-700'
+                          }`}>
+                            {proj.code}
+                          </span>
+                          <span className="truncate max-w-[120px]">{proj.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Complete List of Assigned Projects */}
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
+                    <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>All Assigned Projects ({projects.length})</span>
+                  </h4>
+                  <div className="space-y-2.5">
+                    {projects.map((proj, idx) => (
+                      <div
+                        key={proj.id}
+                        onClick={() => setActiveProjectIdx(idx)}
+                        className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
+                          safeIdx === idx
+                            ? 'bg-indigo-50/60 border-indigo-300 ring-2 ring-indigo-500/20 shadow-xs'
+                            : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/60'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                {proj.code}
+                              </span>
+                              <span className="font-extrabold text-slate-900 text-xs">
+                                {proj.name}
+                              </span>
+                            </div>
+                            {proj.client && (
+                              <p className="text-[11px] text-slate-500 font-medium">
+                                Client: <span className="text-slate-700 font-semibold">{proj.client}</span>
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                              {proj.status || 'Active'}
+                            </span>
+                            {onDeallocateProject && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDeallocateProject(proj.id);
+                                }}
+                                className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                title={`Deallocate from ${proj.name}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+            <span className="text-xs text-slate-500 font-medium">
+              Viewing {projects.length} project(s) assigned
+            </span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 interface PMResourceAllocationProps {
   currentUser: User;
@@ -48,6 +498,12 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
   onShowToast,
 }) => {
   const { data: upcomingLeaves = [] } = useGetUpcomingLeavesQuery();
+  // Fetch users internally so we always have fresh data, merge with prop fallback
+  const { data: fetchedUsers = [] } = useGetUsersQuery();
+  const resolvedUsers = React.useMemo(
+    () => (fetchedUsers.length > 0 ? fetchedUsers : allUsers),
+    [fetchedUsers, allUsers]
+  );
   const [empPage, setEmpPage] = useState(1);
   const [empPerPage, setEmpPerPage] = useState(10);
   const [toolPage, setToolPage] = useState(1);
@@ -71,6 +527,7 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
   const [showToolModal, setShowToolModal] = useState(false);
   const [showEditToolModal, setShowEditToolModal] = useState(false);
   const [editingAllocation, setEditingAllocation] = useState<any | null>(null);
+  const [selectedSliderEmployee, setSelectedSliderEmployee] = useState<EmployeeAllocationRecord | null>(null);
 
   // Form states for Tool Edit
   const [editMonthlyCost, setEditMonthlyCost] = useState<number>(0);
@@ -133,6 +590,7 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
       if (currentUser?.role === 'admin') return true;
       if (p.project_manager_id && currentUser?.id && String(p.project_manager_id) === String(currentUser.id)) return true;
       if (p.pmName && currentUser?.name && p.pmName.trim().toLowerCase() === currentUser.name.trim().toLowerCase()) return true;
+      if (currentUser?.role === 'pm' && (!p.project_manager_id || p.pmName === 'Unknown')) return true;
       return false;
     });
   }, [projects, currentUser]);
@@ -166,14 +624,6 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
       console.error('Batch assign failed:', err);
       onShowToast('Bulk Allocation Failed', err?.data?.message || err?.message || 'Could not complete batch assignment.', 'error');
     }
-  };
-
-
-
-  // Handle remove employee submission
-  const handleRemoveUser = (projectId: string, userId: string, userName: string, projectName: string) => {
-    onRemoveUserFromProject(projectId, userId);
-    onShowToast('Employee Removed', `Removed ${userName} from ${projectName}.`, 'info');
   };
 
   // Handle add tool submission
@@ -221,46 +671,91 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
     onShowToast('Tool Deallocated', `Deallocated ${toolName} from ${projectName}.`, 'info');
   };
 
-  // Build employee rows
+  // Handle employee deallocation from a project
+  const handleDeallocateEmployee = (projectId: string, userId: string, userName?: string) => {
+    const targetProject = pmProjects.find((p) => String(p.id) === String(projectId));
+    const projName = targetProject?.name || `Project #${projectId}`;
+    onRemoveUserFromProject(projectId, userId);
+    onShowToast('Employee Deallocated', `Deallocated ${userName || 'employee'} from ${projName}.`, 'info');
+
+    if (selectedSliderEmployee && String(selectedSliderEmployee.userId) === String(userId)) {
+      const remainingProjects = selectedSliderEmployee.projects.filter((p) => String(p.id) !== String(projectId));
+      if (remainingProjects.length === 0) {
+        setSelectedSliderEmployee(null);
+      } else {
+        setSelectedSliderEmployee({
+          ...selectedSliderEmployee,
+          projects: remainingProjects,
+        });
+      }
+    }
+  };
+
+  // Build grouped employee rows (1 row per unique employee with segregated assigned projects)
   const employeeAllocations = React.useMemo(() => {
-    const list: Array<{
-      projectId: string;
-      projectName: string;
-      projectCode: string;
-      userId: string;
-      userName: string;
-      userEmail: string;
-      userRole: string;
-      userAvatar: string;
-      userTitle: string;
-      userDept: string;
-      leaveStatus?: string;
-    }> = [];
+    const userMap = new Map<string, EmployeeAllocationRecord>();
 
     pmProjects.forEach((proj) => {
-      (proj.assignedUserIds || []).forEach((uId) => {
-        const userObj = allUsers.find((u) => u.id === uId);
-        if (userObj) {
-          const userLeave = upcomingLeaves.find((l) => String(l.userId) === String(userObj.id));
-          list.push({
-            projectId: proj.id,
-            projectName: proj.name,
-            projectCode: proj.code,
-            userId: userObj.id,
-            userName: userObj.name,
-            userEmail: userObj.email,
-            userRole: userObj.role,
-            userAvatar: userObj.avatar,
-            userTitle: userObj.title,
-            userDept: userObj.department,
+      const assignedIds = (proj.assignedUserIds && proj.assignedUserIds.length > 0)
+        ? proj.assignedUserIds
+        : ((proj as any).assigned_user_ids || []);
+
+      assignedIds.forEach((uId: any) => {
+        const uIdStr = String(uId);
+        const userObj = resolvedUsers.find((u) => String(u.id) === uIdStr);
+
+        // Only show Active employees to the PM in Resource Allocation
+        if (userObj && userObj.status && userObj.status.toLowerCase() !== 'active') {
+          return;
+        }
+
+        if (!userMap.has(uIdStr)) {
+          const userLeave = upcomingLeaves.find((l) => String(l.userId) === uIdStr);
+          const userName = userObj?.name || (currentUser && String(currentUser.id) === uIdStr ? currentUser.name : `Employee #${uIdStr}`);
+          const userEmail = userObj?.email || (currentUser && String(currentUser.id) === uIdStr ? currentUser.email : '');
+          const userAvatar = userObj?.avatar || (currentUser && String(currentUser.id) === uIdStr ? currentUser.avatar : undefined);
+          const userTitle = userObj?.title || (currentUser && String(currentUser.id) === uIdStr ? currentUser.title : 'Engineer');
+          const userDept = userObj?.department || (currentUser && String(currentUser.id) === uIdStr ? currentUser.department : 'Delivery');
+
+          userMap.set(uIdStr, {
+            userId: uIdStr,
+            userName,
+            userEmail,
+            userAvatar,
+            userTitle,
+            userDept,
             leaveStatus: userLeave ? `On Leave: ${userLeave.startDate} to ${userLeave.endDate}` : undefined,
+            projects: [],
+          });
+        }
+
+        const entry = userMap.get(uIdStr)!;
+        if (!entry.projects.some((p) => String(p.id) === String(proj.id))) {
+          entry.projects.push({
+            id: proj.id,
+            name: proj.name,
+            code: proj.code || 'PRJ',
+            client: proj.client,
+            status: proj.status || 'Active',
+            startDate: proj.startDate,
+            endDate: proj.endDate,
+            budget: proj.budget,
+            loggedHours: proj.loggedHours,
+            billableHours: proj.billableHours,
+            milestonesCount: (proj.milestones || []).length,
+            description: proj.description,
+            pmName: proj.pmName,
           });
         }
       });
     });
 
-    return list;
-  }, [pmProjects, allUsers, upcomingLeaves]);
+    return Array.from(userMap.values());
+  }, [pmProjects, resolvedUsers, upcomingLeaves, currentUser]);
+
+  const totalAllocationsCount = React.useMemo(() => {
+    return employeeAllocations.reduce((acc, e) => acc + e.projects.length, 0);
+  }, [employeeAllocations]);
 
   // Build tool rows
   const toolAllocations = React.useMemo(() => {
@@ -313,11 +808,25 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
   }, [toolAllocations]);
 
   const filteredEmployees = employeeAllocations.filter((row) => {
-    const matchesProject = selectedProjectFilter === 'all' || row.projectId === selectedProjectFilter;
+    const matchesProject =
+      selectedProjectFilter === 'all' ||
+      row.projects.some((p) => String(p.id) === String(selectedProjectFilter));
+
+    const q = searchTerm.toLowerCase().trim();
+    if (!q) return matchesProject;
+
     const matchesSearch =
-      row.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      row.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      row.userDept.toLowerCase().includes(searchTerm.toLowerCase());
+      row.userName.toLowerCase().includes(q) ||
+      row.userEmail.toLowerCase().includes(q) ||
+      row.userDept.toLowerCase().includes(q) ||
+      row.userTitle.toLowerCase().includes(q) ||
+      row.projects.some(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.code.toLowerCase().includes(q) ||
+          (p.client && p.client.toLowerCase().includes(q))
+      );
+
     return matchesProject && matchesSearch;
   });
 
@@ -478,7 +987,8 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
                 <tr>
                   <th className="py-3 px-4">Employee</th>
                   <th className="py-3 px-4">Designation & Dept</th>
-                  <th className="py-3 px-4">Assigned Project</th>
+                  <th className="py-3 px-4">Assigned Projects</th>
+                  <th className="py-3 px-4">Allocations</th>
                   <th className="py-3 px-4">Availability</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
@@ -486,20 +996,26 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                 {filteredEmployees.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-slate-400 italic">
+                    <td colSpan={6} className="py-8 text-center text-slate-400 italic">
                       No team members assigned matching your search criteria.
                     </td>
                   </tr>
                 ) : (
                   paginatedEmployees.map((row) => (
-                    <tr key={`${row.projectId}-${row.userId}`} className="hover:bg-slate-50/70 transition-colors">
+                    <tr key={row.userId} className="hover:bg-slate-50/70 transition-colors">
                       <td className="py-3.5 px-4">
                         <div className="flex items-center gap-3">
-                          <img
-                            src={row.userAvatar || 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&auto=format&fit=crop&q=80'}
-                            alt={row.userName}
-                            className="w-8 h-8 rounded-full object-cover border border-slate-200"
-                          />
+                          {row.userAvatar ? (
+                            <img
+                              src={row.userAvatar}
+                              alt={row.userName}
+                              className="w-8 h-8 rounded-full object-cover border border-slate-200 shrink-0"
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs border border-slate-300 shrink-0">
+                              {row.userName.charAt(0).toUpperCase()}
+                            </div>
+                          )}
                           <div>
                             <p className="font-extrabold text-slate-900">{row.userName}</p>
                             <p className="text-[10px] text-slate-400">{row.userEmail}</p>
@@ -511,12 +1027,22 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
                         <p className="text-[10px] text-slate-400 font-medium">{row.userDept}</p>
                       </td>
                       <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                            {row.projectCode}
-                          </span>
-                          <span className="font-bold text-slate-800">{row.projectName}</span>
-                        </div>
+                        <EmployeeProjectCellSlider
+                          projects={row.projects}
+                          onOpenSlider={() => setSelectedSliderEmployee(row)}
+                          onDeallocate={(projId) => handleDeallocateEmployee(projId, row.userId, row.userName)}
+                        />
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSliderEmployee(row)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 hover:border-indigo-300 transition-all cursor-pointer shadow-2xs group"
+                          title="Click to open project slider"
+                        >
+                          <Briefcase className="w-3 h-3 text-indigo-500 group-hover:scale-110 transition-transform" />
+                          <span>{row.projects.length} {row.projects.length === 1 ? 'project' : 'projects'}</span>
+                        </button>
                       </td>
                       <td className="py-3.5 px-4">
                         {row.leaveStatus ? (
@@ -532,13 +1058,28 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={() => handleRemoveUser(row.projectId, row.userId, row.userName, row.projectName)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                          title="Remove from project"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSliderEmployee(row)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 text-slate-700 hover:text-indigo-700 font-bold text-xs transition-all cursor-pointer shadow-2xs group"
+                            title={`View all project allocations for ${row.userName}`}
+                          >
+                            <Sliders className="w-3.5 h-3.5 text-indigo-600 group-hover:rotate-180 transition-transform duration-300" />
+                            <span>View Projects</span>
+                            <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                          </button>
+                          {selectedProjectFilter !== 'all' && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeallocateEmployee(selectedProjectFilter, row.userId, row.userName)}
+                              className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 transition-colors cursor-pointer"
+                              title={`Deallocate ${row.userName} from this project`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -687,10 +1228,38 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
           return p.name.toLowerCase().includes(q) || (p.code && p.code.toLowerCase().includes(q)) || (p.client && p.client.toLowerCase().includes(q));
         });
 
-        const allEmployees = allUsers.filter((u) => u.role === 'employee' && (!u.status || u.status.toLowerCase() === 'active'));
+        // Target projects currently selected
+        const selectedProjects = pmProjects.filter((p) =>
+          bulkSelectedProjectIds.map(String).includes(String(p.id))
+        );
+
+        // Gather all user IDs already allocated to the selected project(s)
+        const alreadyAllocatedUserIds = new Set<string>();
+        selectedProjects.forEach((p) => {
+          const assignedIds = p.assignedUserIds || (p as any).assigned_user_ids || [];
+          assignedIds.forEach((uId: any) => {
+            alreadyAllocatedUserIds.add(String(uId));
+          });
+        });
+
+        const allEmployees = resolvedUsers.filter(
+          (u) =>
+            (u.role === 'employee' || u.role === 'pm') &&
+            u.status?.toLowerCase() === 'active'
+        );
         const departmentList = Array.from(new Set(allEmployees.map((u) => u.department).filter(Boolean)));
 
-        const filteredEmployees = allEmployees.filter((u) => {
+        // Exclude employees who are already allocated to the selected target project(s)
+        const availableEmployees = allEmployees.filter((u) => {
+          if (bulkSelectedProjectIds.length > 0 && alreadyAllocatedUserIds.has(String(u.id))) {
+            return false;
+          }
+          return true;
+        });
+
+        const alreadyAllocatedCount = allEmployees.length - availableEmployees.length;
+
+        const filteredEmployees = availableEmployees.filter((u) => {
           const matchesDept = bulkDepartmentFilter === 'all' || u.department === bulkDepartmentFilter;
           if (!matchesDept) return false;
           if (!bulkEmployeeSearch.trim()) return true;
@@ -705,16 +1274,45 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
 
         const totalAssignments = bulkSelectedProjectIds.length * bulkSelectedUserIds.length;
 
+        const handleToggleProject = (projectId: string) => {
+          const isSelected = bulkSelectedProjectIds.includes(projectId);
+          const nextProjectIds = isSelected
+            ? bulkSelectedProjectIds.filter((id) => id !== projectId)
+            : [...bulkSelectedProjectIds, projectId];
+
+          setBulkSelectedProjectIds(nextProjectIds);
+
+          // Prune any selected employees who are already allocated to the updated project set
+          const nextSelectedProjects = pmProjects.filter((p) => nextProjectIds.map(String).includes(String(p.id)));
+          const nextAllocatedIds = new Set<string>();
+          nextSelectedProjects.forEach((p) => {
+            const assignedIds = p.assignedUserIds || (p as any).assigned_user_ids || [];
+            assignedIds.forEach((uId: any) => nextAllocatedIds.add(String(uId)));
+          });
+
+          setBulkSelectedUserIds((prev) => prev.filter((uId) => !nextAllocatedIds.has(String(uId))));
+        };
+
         const toggleSelectAllProjects = () => {
           if (bulkSelectedProjectIds.length === filteredProjects.length) {
             setBulkSelectedProjectIds([]);
+            setBulkSelectedUserIds([]);
           } else {
-            setBulkSelectedProjectIds(filteredProjects.map((p) => p.id));
+            const nextIds = filteredProjects.map((p) => p.id);
+            setBulkSelectedProjectIds(nextIds);
+
+            const nextSelectedProjects = pmProjects.filter((p) => nextIds.map(String).includes(String(p.id)));
+            const nextAllocatedIds = new Set<string>();
+            nextSelectedProjects.forEach((p) => {
+              (p.assignedUserIds || []).forEach((uId) => nextAllocatedIds.add(String(uId)));
+            });
+
+            setBulkSelectedUserIds((prev) => prev.filter((uId) => !nextAllocatedIds.has(String(uId))));
           }
         };
 
         const toggleSelectAllEmployees = () => {
-          if (bulkSelectedUserIds.length === filteredEmployees.length) {
+          if (bulkSelectedUserIds.length === filteredEmployees.length && filteredEmployees.length > 0) {
             setBulkSelectedUserIds([]);
           } else {
             setBulkSelectedUserIds(filteredEmployees.map((u) => u.id));
@@ -792,13 +1390,7 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
                         return (
                           <div
                             key={p.id}
-                            onClick={() => {
-                              if (isSelected) {
-                                setBulkSelectedProjectIds(bulkSelectedProjectIds.filter((id) => id !== p.id));
-                              } else {
-                                setBulkSelectedProjectIds([...bulkSelectedProjectIds, p.id]);
-                              }
-                            }}
+                            onClick={() => handleToggleProject(p.id)}
                             className={`p-2.5 rounded-lg border transition-all cursor-pointer flex items-center justify-between ${
                               isSelected
                                 ? 'bg-indigo-50/80 border-indigo-400 shadow-2xs'
@@ -840,13 +1432,29 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
                         <span>2. Select Team Members</span>
                       </h4>
                       <span className="text-[10px] text-slate-500">
-                        {bulkSelectedUserIds.length} of {allEmployees.length} selected
+                        {bulkSelectedProjectIds.length === 0 ? (
+                          'Select target project(s) first'
+                        ) : (
+                          <>
+                            {bulkSelectedUserIds.length} of {filteredEmployees.length} available selected
+                            {alreadyAllocatedCount > 0 && (
+                              <span className="text-emerald-700 font-semibold ml-1">
+                                ({alreadyAllocatedCount} already allocated)
+                              </span>
+                            )}
+                          </>
+                        )}
                       </span>
                     </div>
                     <button
                       type="button"
+                      disabled={bulkSelectedProjectIds.length === 0 || filteredEmployees.length === 0}
                       onClick={toggleSelectAllEmployees}
-                      className="px-2 py-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-200 cursor-pointer"
+                      className={`px-2 py-1 text-[10px] font-bold rounded border cursor-pointer transition-all ${
+                        bulkSelectedProjectIds.length === 0 || filteredEmployees.length === 0
+                          ? 'text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed'
+                          : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
+                      }`}
                     >
                       {bulkSelectedUserIds.length === filteredEmployees.length && filteredEmployees.length > 0
                         ? 'Deselect All'
@@ -882,8 +1490,32 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
 
                   {/* Employee List */}
                   <div className="flex-1 max-h-64 overflow-y-auto space-y-1.5 pr-1">
-                    {filteredEmployees.length === 0 ? (
-                      <p className="text-center py-6 text-slate-400 text-xs">No employees match filter</p>
+                    {bulkSelectedProjectIds.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+                        <div className="w-9 h-9 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center mb-2">
+                          <Briefcase className="w-4 h-4" />
+                        </div>
+                        <p className="font-bold text-slate-800 text-xs">Select Target Project(s)</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5 max-w-xs">
+                          Please select one or more projects on the left to see available team members who are not yet allocated.
+                        </p>
+                      </div>
+                    ) : filteredEmployees.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+                        {alreadyAllocatedCount > 0 && !bulkEmployeeSearch.trim() && bulkDepartmentFilter === 'all' ? (
+                          <>
+                            <div className="w-9 h-9 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mb-2">
+                              <CheckCircle2 className="w-4 h-4" />
+                            </div>
+                            <p className="font-bold text-slate-800 text-xs">All Team Members Already Allocated</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5 max-w-xs">
+                              All {allEmployees.length} active employees are already assigned to the selected project(s).
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-center py-8 text-slate-400 text-xs">No employees match filter</p>
+                        )}
+                      </div>
                     ) : (
                       filteredEmployees.map((u) => {
                         const isSelected = bulkSelectedUserIds.includes(u.id);
@@ -1308,6 +1940,17 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
             </div>
           </form>
         </div>
+      )}
+
+      {/* Slide-over Drawer / Project Allocations Slider */}
+      {selectedSliderEmployee && (
+        <EmployeeProjectSliderDrawer
+          employee={selectedSliderEmployee}
+          onClose={() => setSelectedSliderEmployee(null)}
+          onDeallocateProject={(projId) =>
+            handleDeallocateEmployee(projId, selectedSliderEmployee.userId, selectedSliderEmployee.userName)
+          }
+        />
       )}
     </div>
   );

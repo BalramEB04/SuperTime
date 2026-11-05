@@ -14,7 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { UpcomingLeavesWidget } from '../shared/UpcomingLeavesWidget';
-import { useGetUpcomingLeavesQuery } from '../../store/api/dataApi';
+import { useGetUpcomingLeavesQuery, useGetUsersQuery } from '../../store/api/dataApi';
 
 interface PMDashboardProps {
   currentUser: User;
@@ -36,6 +36,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = React.memo(({
   onShowToast,
 }) => {
   const { data: upcomingLeaves = [] } = useGetUpcomingLeavesQuery();
+  const { data: fetchedUsers = [] } = useGetUsersQuery();
   const [showLeavesModal, setShowLeavesModal] = useState(false);
 
   const {
@@ -58,7 +59,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = React.memo(({
     const safeProjects = projects || [];
     const safeTimesheets = timesheets || [];
     const safeWeekendRequests = weekendRequests || [];
-    const safeAllUsers = allUsers || [];
+    const safeAllUsers = fetchedUsers.length > 0 ? fetchedUsers : (allUsers || []);
 
     // PM's projects
     const pProjects = safeProjects.filter((p) => {
@@ -71,10 +72,10 @@ export const PMDashboard: React.FC<PMDashboardProps> = React.memo(({
     const pProjectIds = pProjects.map((p) => String(p.id));
 
     // All team members assigned to PM's projects
-    const assignedTeamUserIds = Array.from(new Set(pProjects.flatMap((p) => (p.assignedUserIds || []).map(String))));
+    const assignedTeamUserIds = Array.from(new Set(pProjects.flatMap((p) => (p.assignedUserIds || (p as any).assigned_user_ids || []).map(String))));
     const teamCount = assignedTeamUserIds.filter(id => {
       const user = safeAllUsers.find(u => String(u.id) === String(id));
-      return user?.role === 'employee';
+      return (user?.role === 'employee' || user?.role === 'pm') && user?.status?.toLowerCase() === 'active';
     }).length;
 
     // Pending Weekend Work Requests for PM's projects
@@ -163,7 +164,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = React.memo(({
     // Identify assigned team members with missing submissions for past working days this week
     const teamMembersWithMissing: { id: string; name: string; missingCount: number }[] = [];
     if (pastWorkingDaysThisWeek.length > 0) {
-      const assignedUserObjs = safeAllUsers.filter((u) => u.role === 'employee' && assignedTeamUserIds.includes(u.id));
+      const assignedUserObjs = safeAllUsers.filter((u) => (u.role === 'employee' || u.role === 'pm') && u.status?.toLowerCase() === 'active' && assignedTeamUserIds.includes(String(u.id)));
       for (const user of assignedUserObjs) {
         const userSheets = pTimesheets.filter((t) => String(t.userId) === String(user.id));
         let userMissing = 0;
@@ -212,7 +213,7 @@ export const PMDashboard: React.FC<PMDashboardProps> = React.memo(({
       avgUtilization: utilization,
       recentTimesheets: recent,
     };
-  }, [projects, timesheets, weekendRequests, allUsers, currentUser]);
+  }, [projects, timesheets, weekendRequests, allUsers, fetchedUsers, currentUser]);
 
   return (
     <div className="space-y-6 text-slate-900 font-sans pb-8">

@@ -54,6 +54,18 @@ const cn = (...classes: Array<string | false | null | undefined>) =>
 const formatHours = (value: number) =>
   Number.isInteger(value) ? `${value}` : value.toFixed(1);
 
+const formatLocalDate = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const parseLocalDate = (dateStr: string): Date => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+};
+
 const getInitials = (name?: string) =>
   (name || 'User')
     .split(' ')
@@ -115,33 +127,42 @@ export const MyDashboard: React.FC<MyDashboardProps> = React.memo(({
   const { data: workingCalendarConfig } = useGetWorkingCalendarQuery();
   const lockHours = workingCalendarConfig?.timesheetLockHours ?? 24;
   const maxPastDays = Math.max(1, Math.ceil(lockHours / 24));
-  const minDateObj = new Date();
-  minDateObj.setDate(minDateObj.getDate() - maxPastDays);
-  const minAllowedDate = minDateObj.toISOString().split('T')[0];
+  
+  const today = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+  const todayStr = useMemo(() => formatLocalDate(today), [today]);
+
+  const minAllowedDate = useMemo(() => {
+    const minD = parseLocalDate(todayStr);
+    minD.setDate(minD.getDate() - maxPastDays);
+    return formatLocalDate(minD);
+  }, [todayStr, maxPastDays]);
 
   const employeeJoinDate = currentUser.joinDate || (currentUser as any).joining_date || '';
-  const effectiveMinAllowedDate = employeeJoinDate && employeeJoinDate > minAllowedDate
-    ? employeeJoinDate
-    : minAllowedDate;
+  const effectiveMinAllowedDate = useMemo(() => {
+    return employeeJoinDate && employeeJoinDate > minAllowedDate
+      ? employeeJoinDate
+      : minAllowedDate;
+  }, [employeeJoinDate, minAllowedDate]);
 
   // Missing EODs calculation for this employee
   const { missingEodDates, fillableMissingDates, isTodayLogged } = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayStr = today.toISOString().split('T')[0];
-
     // Check past 30 days (or since employee joining date)
-    const startDate = new Date(today);
+    const startDate = parseLocalDate(todayStr);
     startDate.setDate(startDate.getDate() - 30);
-    const startDateStr = startDate.toISOString().split('T')[0];
+    const startDateStr = formatLocalDate(startDate);
     const effectiveStart = employeeJoinDate && employeeJoinDate > startDateStr ? employeeJoinDate : startDateStr;
 
     const allMissing: string[] = [];
     const fillableMissing: string[] = [];
 
-    const cur = new Date(effectiveStart + 'T00:00:00');
-    while (cur < today) {
-      const dateStr = cur.toISOString().split('T')[0];
+    const cur = parseLocalDate(effectiveStart);
+    const todayObj = parseLocalDate(todayStr);
+    while (cur < todayObj) {
+      const dateStr = formatLocalDate(cur);
       const dayOfWeek = cur.getDay();
       const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
@@ -163,7 +184,8 @@ export const MyDashboard: React.FC<MyDashboardProps> = React.memo(({
           );
           if (totalHours === 0) {
             allMissing.push(dateStr);
-            if (dateStr >= effectiveMinAllowedDate) {
+            // Strictly check if date is not expired (>= minAllowedDate)
+            if (dateStr >= minAllowedDate && (!employeeJoinDate || dateStr >= employeeJoinDate)) {
               fillableMissing.push(dateStr);
             }
           }
@@ -183,7 +205,7 @@ export const MyDashboard: React.FC<MyDashboardProps> = React.memo(({
       fillableMissingDates: fillableMissing,
       isTodayLogged: todayHours > 0,
     };
-  }, [userTimesheets, holidays, leaveRequests, employeeJoinDate, effectiveMinAllowedDate]);
+  }, [userTimesheets, holidays, leaveRequests, employeeJoinDate, minAllowedDate, todayStr]);
 
   const {
     currentWeekTimesheets,

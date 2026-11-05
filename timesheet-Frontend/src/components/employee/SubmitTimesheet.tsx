@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, Project, TimesheetEntry } from '../../types';
-import { ProjectAssignment, TimesheetCreatePayload, useCreateTimesheetsMutation, useGetLeaveForDateQuery, useGetHolidaysQuery, useGetWorkingCalendarQuery } from '../../store/api/dataApi';
+import { ProjectAssignment, TimesheetCreatePayload, useCreateTimesheetsMutation, useGetLeaveForDateQuery, useGetHolidaysQuery, useGetWorkingCalendarQuery, useGetMyLeaveRequestsQuery } from '../../store/api/dataApi';
 import { MarkLeaveModal } from './MarkLeaveModal';
 import {
   Clock,
@@ -77,6 +77,20 @@ const createEmptyRow = (dateStr: string, projectId: string = ''): FormRow => ({
   nonBillableDescription: '',
 });
 
+/** Safely format Date to YYYY-MM-DD in local time without UTC offset shifts */
+const formatLocalDate = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+/** Safely parse YYYY-MM-DD string into local midnight Date object */
+const parseLocalDate = (dateStr: string): Date => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+};
+
 const PROJECT_ICON_STYLES = [
   { icon: Calculator, bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-100' },
   { icon: Smartphone, bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-100' },
@@ -101,22 +115,29 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
   onClearEditing,
   onShowToast,
 }) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = useMemo(() => formatLocalDate(new Date()), []);
   const [showMarkLeaveModal, setShowMarkLeaveModal] = useState(false);
 
-  // Dynamic lock window and holidays
+  // Dynamic lock window, holidays, and approved leaves
   const { data: workingCalendarConfig } = useGetWorkingCalendarQuery();
   const { data: holidaysList = [] } = useGetHolidaysQuery();
+  const { data: myLeaveRequests = [] } = useGetMyLeaveRequestsQuery(undefined as any);
+
   const lockHours = workingCalendarConfig?.timesheetLockHours ?? 24;
   const maxPastDays = Math.max(1, Math.ceil(lockHours / 24));
-  const minDateObj = new Date();
-  minDateObj.setDate(minDateObj.getDate() - maxPastDays);
-  const minAllowedDate = minDateObj.toISOString().split('T')[0];
+
+  const minAllowedDate = useMemo(() => {
+    const minD = parseLocalDate(today);
+    minD.setDate(minD.getDate() - maxPastDays);
+    return formatLocalDate(minD);
+  }, [today, maxPastDays]);
 
   const employeeJoinDate = currentUser.joinDate || (currentUser as any).joining_date || '';
-  const effectiveMinAllowedDate = employeeJoinDate && employeeJoinDate > minAllowedDate
-    ? employeeJoinDate
-    : minAllowedDate;
+  const effectiveMinAllowedDate = useMemo(() => {
+    return employeeJoinDate && employeeJoinDate > minAllowedDate
+      ? employeeJoinDate
+      : minAllowedDate;
+  }, [employeeJoinDate, minAllowedDate]);
 
   useEffect(() => {
     if (initialOpenMarkLeave) {
@@ -144,24 +165,38 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
     }
   }, [defaultDate, editingEntry]);
 
-  // Missing EODs calculation within active submission window
+  // Missing EODs calculation strictly within active submission window (ONLY dates available to fill)
   const missingEodDates = useMemo(() => {
     if (!timesheets) return [];
-    const todayObj = new Date();
-    todayObj.setHours(0, 0, 0, 0);
-
     const userSheets = timesheets.filter((t) => t.userId === currentUser.id);
     const missing: string[] = [];
-    const cur = new Date(effectiveMinAllowedDate + 'T00:00:00');
+
+    const cur = parseLocalDate(effectiveMinAllowedDate);
+    const todayObj = parseLocalDate(today);
 
     while (cur < todayObj) {
-      const dateStr = cur.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(cur);
       const dayOfWeek = cur.getDay();
       const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
-      if (!isWeekend) {
+      // STRICT VALIDATION:
+      // 1. Must NOT be older than minAllowedDate (never show expired dates)
+      // 2. Must NOT be older than employee's joining date
+      // 3. Must NOT be a weekend
+      const isExpired = dateStr < minAllowedDate;
+      const isBeforeJoining = Boolean(employeeJoinDate && dateStr < employeeJoinDate);
+
+      if (!isWeekend && !isExpired && !isBeforeJoining) {
         const isHoliday = (holidaysList || []).some((h) => h.date === dateStr);
-        if (!isHoliday) {
+        const isOnFullDayLeave = (myLeaveRequests || []).some(
+          (lr: any) =>
+            lr.startDate <= dateStr &&
+            lr.endDate >= dateStr &&
+            (lr.status === 'approved' || lr.status === 'pending') &&
+            (!lr.leaveDurationType || lr.leaveDurationType === 'full_day')
+        );
+
+        if (!isHoliday && !isOnFullDayLeave) {
           const dayEntries = userSheets.filter((t) => t.date === dateStr);
           const totalHours = dayEntries.reduce(
             (sum, t) => sum + (t.billableHours + t.nonBillableHours),
@@ -175,7 +210,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
       cur.setDate(cur.getDate() + 1);
     }
     return missing;
-  }, [timesheets, currentUser.id, effectiveMinAllowedDate, holidaysList]);
+  }, [timesheets, currentUser.id, effectiveMinAllowedDate, minAllowedDate, employeeJoinDate, today, holidaysList, myLeaveRequests]);
 
   const [rows, setRows] = useState<FormRow[]>(() => {
     if (editingEntry) {
@@ -849,6 +884,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
         `Submitted ${grandTotal} hours.`,
         'success'
       );
+
       // Reset form after successful submit
       setRows([createEmptyRow(defaultDate || today, assignedProjects[0]?.id || '')]);
     } catch (e: any) {
@@ -910,7 +946,7 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
                     key={dateStr}
                     type="button"
                     onClick={() => {
-                      setRows((prev) => prev.map((r, i) => i === 0 ? { ...r, date: dateStr } : r));
+                      setRows((prev) => prev.map((r) => ({ ...r, date: dateStr })));
                     }}
                     className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
                       isSelected
@@ -1353,6 +1389,19 @@ export const SubmitTimesheet: React.FC<SubmitTimesheetProps> = ({
             )}
 
             <div className="flex items-center gap-3">
+              {!editingEntry && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetDate = rows[0]?.date || today;
+                    setRows([createEmptyRow(targetDate, assignedProjects[0]?.id || '')]);
+                    onShowToast('Form Reset', 'Cleared all task rows', 'info');
+                  }}
+                  className="px-3 py-2 rounded-xl text-slate-500 hover:text-slate-700 hover:bg-slate-100 text-xs font-semibold cursor-pointer transition-all"
+                >
+                  Clear
+                </button>
+              )}
               <button
                 type="button"
                 disabled={isSubmitting || isWeekendSelected || !!matchedHoliday}

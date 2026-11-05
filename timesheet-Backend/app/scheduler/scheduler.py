@@ -28,50 +28,10 @@ async def ping_database_keepalive():
 
 def start_scheduler():
     """
-    Starts the AsyncIOScheduler and registers recurring background tasks.
+    Scheduler disabled per configuration. Background cron jobs removed.
     """
-    if scheduler.running:
-        logger.warning("Scheduler is already running.")
-        return
-
-    # Job 1: Weekly Timesheet Lock - Every Sunday at 23:59 (Midnight lock)
-    scheduler.add_job(
-        func=lock_past_weekly_timesheets,
-        trigger=CronTrigger(day_of_week="sun", hour=23, minute=59),
-        id="weekly_timesheet_lock_job",
-        replace_existing=True,
-        name="Lock past week timesheets",
-    )
-
-    # Job 2: Weekly Timesheet Reminder - Every Monday at 09:00 AM
-    scheduler.add_job(
-        func=send_weekly_timesheet_reminders,
-        trigger=CronTrigger(day_of_week="mon", hour=9, minute=0),
-        id="weekly_timesheet_reminder_job",
-        replace_existing=True,
-        name="Send weekly timesheet 40h reminders",
-    )
-
-    # Job 3: Daily EOD Timesheet Report to Slack - Every day at 20:00 (8:00 PM IST)
-    scheduler.add_job(
-        func=dispatch_daily_eod_report,
-        trigger=CronTrigger(hour=20, minute=0, timezone="Asia/Kolkata"),
-        id="daily_eod_slack_report_job",
-        replace_existing=True,
-        name="Daily EOD Timesheet Report to Slack (8:00 PM IST)",
-    )
-
-    # Job 4: Neon Database Keep-Alive - Every 2.5 minutes (150 seconds)
-    scheduler.add_job(
-        func=ping_database_keepalive,
-        trigger=IntervalTrigger(seconds=150),
-        id="neon_db_keepalive_job",
-        replace_existing=True,
-        name="Keep Neon Serverless PostgreSQL awake and warm",
-    )
-
-    scheduler.start()
-    logger.info("AsyncIOScheduler started successfully with scheduled cron jobs and Neon keep-alive.")
+    logger.info("Background scheduler is disabled.")
+    return
 
 
 def shutdown_scheduler():
