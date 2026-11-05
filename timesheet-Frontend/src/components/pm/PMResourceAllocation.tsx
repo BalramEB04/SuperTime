@@ -521,7 +521,7 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
   const [bulkProjectSearch, setBulkProjectSearch] = useState('');
   const [bulkEmployeeSearch, setBulkEmployeeSearch] = useState('');
   const [bulkDepartmentFilter, setBulkDepartmentFilter] = useState('all');
-  const [bulkRole, setBulkRole] = useState('Developer');
+  const [bulkAvailabilityFilter, setBulkAvailabilityFilter] = useState<'all' | 'free' | 'busy'>('all');
 
   const [batchAssignUsers, { isLoading: isBatchAssigning }] = useBatchAssignUsersToProjectsMutation();
   const [showToolModal, setShowToolModal] = useState(false);
@@ -606,7 +606,6 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
       const res = await batchAssignUsers({
         project_ids: bulkSelectedProjectIds.map(Number),
         user_ids: bulkSelectedUserIds.map(Number),
-        role: bulkRole || 'Developer',
       }).unwrap();
 
       const data = res?.data || res;
@@ -620,6 +619,8 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
       setBulkSelectedUserIds([]);
       setBulkProjectSearch('');
       setBulkEmployeeSearch('');
+      setBulkDepartmentFilter('all');
+      setBulkAvailabilityFilter('all');
     } catch (err: any) {
       console.error('Batch assign failed:', err);
       onShowToast('Bulk Allocation Failed', err?.data?.message || err?.message || 'Could not complete batch assignment.', 'error');
@@ -1259,9 +1260,32 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
 
         const alreadyAllocatedCount = allEmployees.length - availableEmployees.length;
 
+        const employeeProjectMap = new Map<string, { count: number; projects: Array<{ id: string; name: string; code: string }> }>();
+        pmProjects.forEach((p) => {
+          const isProjActive = p.isActive !== false && (p as any).is_active !== false;
+          if (!isProjActive) return;
+          const assignedIds = (p.assignedUserIds && p.assignedUserIds.length > 0)
+            ? p.assignedUserIds
+            : ((p as any).assigned_user_ids || []);
+          assignedIds.forEach((uId: any) => {
+            const uIdStr = String(uId);
+            if (!employeeProjectMap.has(uIdStr)) {
+              employeeProjectMap.set(uIdStr, { count: 0, projects: [] });
+            }
+            const entry = employeeProjectMap.get(uIdStr)!;
+            entry.count += 1;
+            entry.projects.push({ id: String(p.id), name: p.name, code: p.code });
+          });
+        });
+
         const filteredEmployees = availableEmployees.filter((u) => {
           const matchesDept = bulkDepartmentFilter === 'all' || u.department === bulkDepartmentFilter;
           if (!matchesDept) return false;
+
+          const projCount = employeeProjectMap.get(String(u.id))?.count || 0;
+          if (bulkAvailabilityFilter === 'free' && projCount > 0) return false;
+          if (bulkAvailabilityFilter === 'busy' && projCount === 0) return false;
+
           if (!bulkEmployeeSearch.trim()) return true;
           const q = bulkEmployeeSearch.toLowerCase();
           return (
@@ -1270,6 +1294,11 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
             (u.title && u.title.toLowerCase().includes(q)) ||
             (u.department && u.department.toLowerCase().includes(q))
           );
+        }).sort((a, b) => {
+          const countA = employeeProjectMap.get(String(a.id))?.count || 0;
+          const countB = employeeProjectMap.get(String(b.id))?.count || 0;
+          if (countA !== countB) return countA - countB;
+          return a.name.localeCompare(b.name);
         });
 
         const totalAssignments = bulkSelectedProjectIds.length * bulkSelectedUserIds.length;
@@ -1462,30 +1491,41 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
                     </button>
                   </div>
 
-                  {/* Filters: Search & Department */}
-                  <div className="grid grid-cols-2 gap-2">
+                  {/* Filters: Search, Department & Availability */}
+                  <div className="space-y-2">
                     <div className="relative">
                       <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
                       <input
                         type="text"
-                        placeholder="Search name, email..."
+                        placeholder="Search name, email, designation..."
                         value={bulkEmployeeSearch}
                         onChange={(e) => setBulkEmployeeSearch(e.target.value)}
                         className="w-full pl-8 pr-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs"
                       />
                     </div>
-                    <select
-                      value={bulkDepartmentFilter}
-                      onChange={(e) => setBulkDepartmentFilter(e.target.value)}
-                      className="w-full py-1.5 px-2 bg-white border border-slate-300 rounded-lg text-xs"
-                    >
-                      <option value="all">All Departments</option>
-                      {departmentList.map((dept) => (
-                        <option key={dept} value={dept}>
-                          {dept}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={bulkDepartmentFilter}
+                        onChange={(e) => setBulkDepartmentFilter(e.target.value)}
+                        className="w-full py-1.5 px-2 bg-white border border-slate-300 rounded-lg text-xs"
+                      >
+                        <option value="all">All Departments</option>
+                        {departmentList.map((dept) => (
+                          <option key={dept} value={dept}>
+                            {dept}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={bulkAvailabilityFilter}
+                        onChange={(e) => setBulkAvailabilityFilter(e.target.value as any)}
+                        className="w-full py-1.5 px-2 bg-white border border-slate-300 rounded-lg text-xs"
+                      >
+                        <option value="all">All Capacity</option>
+                        <option value="free">Available (0 proj)</option>
+                        <option value="busy">Assigned (1+ proj)</option>
+                      </select>
+                    </div>
                   </div>
 
                   {/* Employee List */}
@@ -1562,9 +1602,52 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
                                 </p>
                               </div>
                             </div>
-                            <span className="text-[10px] font-semibold text-slate-500 shrink-0">
-                              {currentAssignmentsCount} proj
-                            </span>
+                            {(() => {
+                              const pData = employeeProjectMap.get(String(u.id));
+                              const pCount = pData?.count || 0;
+                              const pTooltip = pCount > 0
+                                ? `Currently on ${pCount} project(s): ${pData.projects.map((p) => `${p.code} (${p.name})`).join(', ')}`
+                                : 'Available / Free (Not assigned to any project)';
+
+                              if (pCount === 0) {
+                                return (
+                                  <span
+                                    title={pTooltip}
+                                    className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0"
+                                  >
+                                    0 proj • Free
+                                  </span>
+                                );
+                              }
+                              if (pCount === 1) {
+                                return (
+                                  <span
+                                    title={pTooltip}
+                                    className="px-2 py-0.5 rounded text-[9px] font-bold bg-sky-50 text-sky-700 border border-sky-200 shrink-0"
+                                  >
+                                    1 proj
+                                  </span>
+                                );
+                              }
+                              if (pCount === 2) {
+                                return (
+                                  <span
+                                    title={pTooltip}
+                                    className="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0"
+                                  >
+                                    2 proj
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span
+                                  title={pTooltip}
+                                  className="px-2 py-0.5 rounded text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200 shrink-0"
+                                >
+                                  {pCount} proj • Heavy
+                                </span>
+                              );
+                            })()}
                           </div>
                         );
                       })
@@ -1573,24 +1656,13 @@ export const PMResourceAllocation: React.FC<PMResourceAllocationProps> = React.m
                 </div>
               </div>
 
-              {/* Assignment Role selection */}
+              {/* Allocation Summary Bar */}
               <div className="px-5 py-2.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-slate-700">Assignment Role:</span>
-                  <select
-                    value={bulkRole}
-                    onChange={(e) => setBulkRole(e.target.value)}
-                    className="bg-white border border-slate-300 rounded-lg px-2.5 py-1 font-medium text-slate-800"
-                  >
-                    <option value="Developer">Developer</option>
-                    <option value="Senior Developer">Senior Developer</option>
-                    <option value="Tech Lead">Tech Lead</option>
-                    <option value="QA Engineer">QA Engineer</option>
-                    <option value="Designer">UI/UX Designer</option>
-                    <option value="DevOps Engineer">DevOps Engineer</option>
-                    <option value="Business Analyst">Business Analyst</option>
-                  </select>
-                </div>
+                <span className="text-slate-500 font-medium">
+                  {bulkSelectedProjectIds.length > 0 && bulkSelectedUserIds.length > 0
+                    ? `Assigning ${bulkSelectedUserIds.length} active employee${bulkSelectedUserIds.length !== 1 ? 's' : ''} across ${bulkSelectedProjectIds.length} project${bulkSelectedProjectIds.length !== 1 ? 's' : ''}`
+                    : 'Select target project(s) and team member(s) to view total assignment breakdown'}
+                </span>
 
                 <div className="text-right">
                   <span className="font-bold text-indigo-950">
