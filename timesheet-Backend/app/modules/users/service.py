@@ -2,14 +2,15 @@ import asyncio
 from typing import List, Optional, Tuple
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 
 from app.modules.users.model import User
 from app.modules.roles.repository import RoleRepository
 from app.modules.users.repository import UserRepository
 from app.modules.users.schema import UserCreate, UserUpdate
 from app.modules.users.validator import UserValidator
+from app.modules.departments.designation_model import Designation
 from app.services.email_service import send_welcome_email
-
 
 
 class UserService:
@@ -35,7 +36,6 @@ class UserService:
 
         # Auto-generate employee_id if not provided
         if not data.employee_id:
-            from sqlalchemy import select, func
             stmt = select(func.max(User.id))
             max_id = await db.scalar(stmt) or 0
             data.employee_id = f"EMP-{max_id + 1}"
@@ -50,6 +50,22 @@ class UserService:
 
         # 4. Validate status if provided
         user_status = UserValidator.validate_status(data.status or "Pending")
+        clean_designation = data.designation.strip()
+
+        # Approach A: Auto-catalog designation in department if not present
+        if data.department_id and clean_designation:
+            desig_stmt = select(Designation).where(
+                Designation.department_id == data.department_id,
+                func.lower(Designation.name) == clean_designation.lower(),
+            )
+            existing_desig = (await db.execute(desig_stmt)).scalars().first()
+            if not existing_desig:
+                new_desig = Designation(
+                    department_id=data.department_id,
+                    name=clean_designation,
+                    is_active=True,
+                )
+                db.add(new_desig)
 
         new_user = User(
             email=data.email,
@@ -58,6 +74,7 @@ class UserService:
             employee_id=data.employee_id,
             role_id=data.role_id,
             department_id=data.department_id,
+            designation=clean_designation,
             joining_date=data.joining_date,
             ctc=data.ctc,
             status=user_status,
@@ -67,12 +84,22 @@ class UserService:
 
         # Dispatch Welcome Email Notification asynchronously in background so POST returns instantly
         if created_user.email:
-            user_full_name = f"{created_user.first_name} {created_user.last_name}".strip()
             role_name = role.name if role else "Employee"
+            dept_name = "General"
+            if created_user.department_id:
+                from app.modules.departments.model import Department
+                dept_res = await db.execute(select(Department).where(Department.id == created_user.department_id))
+                dept_obj = dept_res.scalars().first()
+                if dept_obj:
+                    dept_name = dept_obj.name
+
             try:
                 asyncio.create_task(send_welcome_email(
                     to_email=created_user.email,
-                    user_name=user_full_name,
+                    first_name=created_user.first_name,
+                    last_name=created_user.last_name,
+                    designation=created_user.designation,
+                    department_name=dept_name,
                     role_name=role_name,
                     employee_id=created_user.employee_id,
                 ))
@@ -80,7 +107,6 @@ class UserService:
                 pass
 
         return created_user
-
 
     @staticmethod
     async def get_user_by_id(db: AsyncSession, user_id: int) -> User:
@@ -141,6 +167,24 @@ class UserService:
         # Validate status if updating
         if "status" in update_dict:
             update_dict["status"] = UserValidator.validate_status(update_dict["status"])
+
+        # Approach A: Auto-catalog designation in department if updated
+        if "designation" in update_dict and update_dict["designation"]:
+            clean_designation = update_dict["designation"].strip()
+            update_dict["designation"] = clean_designation
+            target_dept_id = update_dict.get("department_id") or user.department_id
+            if target_dept_id and clean_designation:
+                desig_stmt = select(Designation).where(
+                    Designation.department_id == target_dept_id,
+                    func.lower(Designation.name) == clean_designation.lower(),
+                )
+                existing_desig = (await db.execute(desig_stmt)).scalars().first()
+                if not existing_desig:
+                    db.add(Designation(
+                        department_id=target_dept_id,
+                        name=clean_designation,
+                        is_active=True,
+                    ))
 
         return await UserRepository.update(db, user, update_dict)
 

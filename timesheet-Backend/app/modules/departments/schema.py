@@ -28,3 +28,23 @@ class DepartmentResponse(DepartmentBase):
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DesignationBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    department_id: int
+
+
+class DesignationCreate(DesignationBase):
+    pass
+
+
+class DesignationResponse(BaseModel):
+    id: int
+    department_id: int
+    name: str
+    is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)

@@ -45,6 +45,35 @@ async def get_departments(
     )
 
 
+@router.get("/designations/all", summary="List all designations across all departments")
+async def get_all_designations(
+    active_only: bool = Query(True, description="Filter only active designations"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    service = DepartmentService(db)
+    designations = await service.get_all_designations(active_only=active_only)
+    return success_response(
+        data=[d.model_dump(mode="json") for d in designations],
+        message="All designations retrieved successfully",
+    )
+
+
+@router.get("/{department_id}/designations", summary="List designations for a department")
+async def get_department_designations(
+    department_id: int,
+    active_only: bool = Query(True, description="Filter only active designations"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    service = DepartmentService(db)
+    designations = await service.get_designations(department_id, active_only=active_only)
+    return success_response(
+        data=[d.model_dump(mode="json") for d in designations],
+        message="Designations retrieved successfully",
+    )
+
+
 @router.get("/{department_id}", summary="Get department by ID")
 async def get_department(
     department_id: int,

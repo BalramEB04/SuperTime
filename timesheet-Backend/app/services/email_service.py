@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import logging
 import smtplib
 from pathlib import Path
@@ -162,23 +163,34 @@ async def send_weekly_timesheet_reminder_email(
 
 async def send_welcome_email(
     to_email: str,
-    user_name: str,
+    first_name: str,
+    last_name: str,
+    designation: str,
+    department_name: str,
     role_name: str,
     employee_id: str,
+    login_url: str = "https://super-time-frontend.vercel.app",
 ) -> bool:
     """Dispatches a formatted Welcome email to a newly created employee."""
-    subject = "Welcome to Timesheet Management System!"
+    full_name = f"{first_name} {last_name}".strip()
+    subject = "Welcome to SuperTime!"
     body_text = (
-        f"Hi {user_name},\n\n"
-        f"Welcome aboard! Your employee profile ({employee_id}) with role '{role_name}' "
-        f"has been created and activated.\n\n"
-        f"Best regards,\nTimesheet Management System"
+        f"Hi {full_name},\n\n"
+        f"Welcome to SuperTime! Your employee profile with designation '{designation}' "
+        f"in the {department_name} department has been created.\n\n"
+        f"Access your dashboard at: {login_url}\n\n"
+        f"Best regards,\nSuperTime Team"
     )
     context = {
-        "user_name": user_name,
+        "first_name": first_name,
+        "last_name": last_name,
         "email": to_email,
+        "designation": designation,
+        "department_name": department_name,
         "role_name": role_name,
         "employee_id": employee_id,
+        "login_url": login_url,
+        "current_year": datetime.now().year,
     }
     body_html = render_email_template("welcome.html", context)
     return await send_email(to_email, subject, body_text, body_html)

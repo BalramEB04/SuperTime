@@ -21,6 +21,7 @@ class User(Base):
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    designation: Mapped[str] = mapped_column(String(100), nullable=False)
     joining_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     ctc: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="Active", nullable=False)

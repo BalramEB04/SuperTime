@@ -7,6 +7,7 @@ from app.modules.departments.schema import (
     DepartmentCreate,
     DepartmentResponse,
     DepartmentUpdate,
+    DesignationResponse,
 )
 
 
@@ -49,12 +50,12 @@ class DepartmentService:
         return response
 
     async def get_all_departments(self, active_only: bool = True) -> List[DepartmentResponse]:
-        results = await self.repository.get_all_with_counts(active_only=active_only)
+        dept_rows = await self.repository.get_all_with_counts(active_only=active_only)
         responses = []
-        for dept, count in results:
-            item = DepartmentResponse.model_validate(dept)
-            item.employee_count = count
-            responses.append(item)
+        for dept, count in dept_rows:
+            resp = DepartmentResponse.model_validate(dept)
+            resp.employee_count = count
+            responses.append(resp)
         return responses
 
     async def update_department(
@@ -67,15 +68,15 @@ class DepartmentService:
                 detail="Department not found",
             )
 
-        if dept_in.name and dept_in.name.strip().lower() != dept.name.lower():
-            existing = await self.repository.get_by_name(dept_in.name)
-            if existing and existing.id != dept_id:
+        if dept_in.name and dept_in.name != dept.name:
+            existing_name = await self.repository.get_by_name(dept_in.name)
+            if existing_name and existing_name.id != dept_id:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Department with name '{dept_in.name}' already exists",
                 )
 
-        if dept_in.code and (not dept.code or dept_in.code.strip().lower() != dept.code.lower()):
+        if dept_in.code and dept_in.code != dept.code:
             existing_code = await self.repository.get_by_code(dept_in.code)
             if existing_code and existing_code.id != dept_id:
                 raise HTTPException(
@@ -105,3 +106,17 @@ class DepartmentService:
             )
 
         await self.repository.delete(dept)
+
+    async def get_designations(self, dept_id: int, active_only: bool = True) -> List[DesignationResponse]:
+        dept = await self.repository.get_by_id(dept_id)
+        if not dept:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Department not found",
+            )
+        designations = await self.repository.get_designations_by_department(dept_id, active_only)
+        return [DesignationResponse.model_validate(d) for d in designations]
+
+    async def get_all_designations(self, active_only: bool = True) -> List[DesignationResponse]:
+        designations = await self.repository.get_all_designations(active_only)
+        return [DesignationResponse.model_validate(d) for d in designations]
